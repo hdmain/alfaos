@@ -192,36 +192,70 @@ func CommandExists(name string) bool {
 }
 
 func InstallHostPackages(pm string) error {
-	packages := hostPackagesForPM(pm)
-	if len(packages) == 0 {
-		return fmt.Errorf("unsupported package manager: %s", pm)
-	}
-
-	logging.Info("Installing host packages: %s", strings.Join(packages, ", "))
-
 	switch pm {
 	case "apt":
-		if _, err := RunCommand("apt-get", "update", "-qq"); err != nil {
-			logging.Warn("apt-get update failed (broken third-party repos?) — continuing: %v", err)
-		}
-		args := append([]string{"install", "-y", "-qq"}, packages...)
-		_, err := RunCommand("apt-get", args...)
-		return err
+		return installAptPackages()
 	case "dnf":
+		packages := hostPackagesForPM(pm)
+		logging.Info("Installing host packages: %s", strings.Join(packages, ", "))
 		args := append([]string{"install", "-y", "-q"}, packages...)
 		_, err := RunCommand("dnf", args...)
 		return err
 	case "pacman":
+		packages := hostPackagesForPM(pm)
+		logging.Info("Installing host packages: %s", strings.Join(packages, ", "))
 		args := append([]string{"-S", "--noconfirm", "--needed"}, packages...)
 		_, err := RunCommand("pacman", args...)
 		return err
 	case "zypper":
+		packages := hostPackagesForPM(pm)
+		logging.Info("Installing host packages: %s", strings.Join(packages, ", "))
 		args := append([]string{"install", "-y", "-q"}, packages...)
 		_, err := RunCommand("zypper", args...)
 		return err
 	default:
 		return fmt.Errorf("unsupported package manager: %s", pm)
 	}
+}
+
+func aptUpdateResilient() {
+	if _, err := RunCommand("apt-get", "update", "-qq"); err == nil {
+		return
+	}
+	logging.Warn("apt-get update failed — retrying without third-party sources (e.g. Docker)")
+	if _, err := RunCommand("apt-get", "-o", "Dir::Etc::sourceparts=/dev/null", "update", "-qq"); err != nil {
+		logging.Warn("apt-get update still failed — continuing with cached package lists: %v", err)
+	}
+}
+
+func installAptPackages() error {
+	core := []string{
+		"qemu-kvm", "libvirt-daemon-system", "libvirt-clients",
+		"virtinst", "bridge-utils", "genisoimage", "wget", "curl",
+		"openssh-client", "sshpass", "qemu-system-x86", "libvirt-daemon",
+		"libvirt-daemon-driver-qemu", "libguestfs-tools", "dnsmasq-base",
+		"iproute2", "netcat-openbsd",
+	}
+	optionalRDP := []string{"rdesktop", "freerdp3-x11", "freerdp2-x11"}
+
+	logging.Info("Installing host packages: %s", strings.Join(core, ", "))
+	aptUpdateResilient()
+
+	args := append([]string{"install", "-y", "-qq", "--no-install-recommends"}, core...)
+	if _, err := RunCommand("apt-get", args...); err != nil {
+		return err
+	}
+
+	for _, pkg := range optionalRDP {
+		if _, err := RunCommand("apt-get", "install", "-y", "-qq", "--no-install-recommends", pkg); err != nil {
+			logging.Warn("Optional RDP client %s not installed: %v", pkg, err)
+			continue
+		}
+		logging.Info("Installed optional RDP client: %s", pkg)
+		break // one RDP client is enough
+	}
+
+	return nil
 }
 
 func hostPackagesForPM(pm string) []string {
@@ -235,7 +269,7 @@ func hostPackagesForPM(pm string) []string {
 		return append(common,
 			"qemu-system-x86", "libvirt-daemon", "libvirt-daemon-driver-qemu",
 			"libguestfs-tools", "dnsmasq-base", "iproute2", "netcat-openbsd",
-			"rdesktop", "freerdp2-x11",
+			"rdesktop",
 		)
 	case "dnf":
 		return []string{

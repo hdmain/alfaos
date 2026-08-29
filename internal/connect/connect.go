@@ -22,19 +22,24 @@ func Run(cfg *config.Config) error {
 
 	fmt.Fprintf(os.Stderr, "Connecting to %s at %s...\n", ip, res)
 
-	if _, err := exec.LookPath("xfreerdp"); err == nil {
-		cmd := exec.Command("xfreerdp",
-			"/v:"+ip,
-			"/u:"+user,
-			"/p:"+pass,
-			"/size:"+res,
-			"/cert:ignore",
-			"+clipboard",
-		)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+	for _, client := range []struct {
+		bin  string
+		run  func(string) *exec.Cmd
+	}{
+		{"xfreerdp", func(b string) *exec.Cmd {
+			return exec.Command(b, "/v:"+ip, "/u:"+user, "/p:"+pass, "/size:"+res, "/cert:ignore", "+clipboard")
+		}},
+		{"xfreerdp3", func(b string) *exec.Cmd {
+			return exec.Command(b, "/v:"+ip, "/u:"+user, "/p:"+pass, "/size:"+res, "/cert:ignore", "+clipboard")
+		}},
+	} {
+		if _, err := exec.LookPath(client.bin); err == nil {
+			cmd := client.run(client.bin)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return cmd.Run()
+		}
 	}
 
 	if _, err := exec.LookPath("rdesktop"); err == nil {
@@ -52,7 +57,7 @@ func Run(cfg *config.Config) error {
 		return cmd.Run()
 	}
 
-	return fmt.Errorf("no RDP client found — install: sudo apt install rdesktop freerdp2-x11")
+	return fmt.Errorf("no RDP client found — install: sudo apt install rdesktop freerdp3-x11")
 }
 
 func ResolveVMIP(cfg *config.Config) (string, error) {
