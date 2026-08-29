@@ -95,17 +95,29 @@ func isNetworkActive(name string) bool {
 }
 
 func injectLibvirtDNS(xml string, servers []string) string {
-	want := buildLibvirtDNSBlock(servers)
-	xml = reLibvirtDNS.ReplaceAllString(xml, "\n")
-	if strings.Contains(xml, want) {
+	if libvirtDNSConfigured(xml, servers) {
 		return xml
 	}
 
-	block := "\n" + want
+	xml = reLibvirtDNS.ReplaceAllString(xml, "\n")
+	block := "\n" + buildLibvirtDNSBlock(servers)
 	if loc := regexp.MustCompile(`\s*<ip `).FindStringIndex(xml); loc != nil {
 		return xml[:loc[0]] + block + xml[loc[0]:]
 	}
 	return strings.Replace(xml, "</network>", block+"\n</network>", 1)
+}
+
+func libvirtDNSConfigured(xml string, servers []string) bool {
+	block := reLibvirtDNS.FindString(xml)
+	if block == "" {
+		return false
+	}
+	for _, s := range servers {
+		if !strings.Contains(block, fmt.Sprintf("addr='%s'", s)) {
+			return false
+		}
+	}
+	return true
 }
 
 func buildLibvirtDNSBlock(servers []string) string {
