@@ -3,11 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/connect"
 	"github.com/alfaos/alfaos/internal/install"
 	"github.com/alfaos/alfaos/internal/logging"
+	"github.com/alfaos/alfaos/internal/networking"
 	"github.com/alfaos/alfaos/internal/virtualization"
 	"github.com/spf13/cobra"
 )
@@ -50,6 +54,13 @@ func main() {
 	}
 	connectCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file (default: configs/default.yaml)")
 
+	exposeCmd := &cobra.Command{
+		Use:   "expose-rdp",
+		Short: "Forward host RDP port (0.0.0.0:3389) to the ALFAOS VM",
+		RunE:  runExposeRDP,
+	}
+	exposeCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file (default: configs/default.yaml)")
+
 	startCmd := vmCommand("start", "Start the ALFAOS VM", func(vm *virtualization.Manager) error {
 		return vm.StartVM()
 	})
@@ -68,7 +79,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(installCmd, connectCmd, startCmd, shutdownCmd, rebootCmd, versionCmd)
+	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, startCmd, shutdownCmd, rebootCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -81,6 +92,48 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return connect.Run(cfg)
+}
+
+func runExposeRDP(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("alfaos expose-rdp must be run as root: sudo alfaos expose-rdp")
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	vm := virtualization.New(cfg)
+	vmIP, err := readVMIP(cfg, vm)
+	if err != nil {
+		return err
+	}
+	bind := cfg.RDP.BindHost
+	if bind == "" {
+		bind = "0.0.0.0"
+	}
+	if err := networking.ExposeRDP(cfg.Paths.StateDir, bind, cfg.RDP.Port, vmIP, cfg.RDP.Port); err != nil {
+		return err
+	}
+	host := networking.RDPConnectAddress(cfg.RDP.Port, true, vmIP)
+	fmt.Printf("RDP exposed: %s:%d → VM %s:%d\n", bind, cfg.RDP.Port, vmIP, cfg.RDP.Port)
+	if host != "" && host != vmIP {
+		fmt.Printf("Connect from outside: rdesktop %s -u %s -p %s\n", host, cfg.ALFAOS.Username, cfg.ALFAOS.Password)
+	}
+	return nil
+}
+
+func readVMIP(cfg *config.Config, vm *virtualization.Manager) (string, error) {
+	ipFile := filepath.Join(cfg.Paths.StateDir, "vm.ip")
+	if data, err := os.ReadFile(ipFile); err == nil {
+		if ip := strings.TrimSpace(string(data)); ip != "" {
+			return ip, nil
+		}
+	}
+	vmIP, err := vm.GetVMIP(2 * time.Minute)
+	if err != nil {
+		return "", fmt.Errorf("VM IP: %w", err)
+	}
+	return vmIP, nil
 }
 
 func vmCommand(use, short string, fn func(*virtualization.Manager) error) *cobra.Command {

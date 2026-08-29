@@ -55,6 +55,10 @@ func (v *Verifier) RunAll(hostReq *host.Requirements) (bool, error) {
 		v.checkRemote("RDP service running", "systemctl is-active xrdp 2>/dev/null | grep -q active && echo ok")
 		v.add("Network connectivity", networking.TestPing(v.vmIP), v.vmIP)
 		v.add("RDP port reachable", networking.TestPort(v.vmIP, fmt.Sprintf("%d", v.cfg.RDP.Port)), fmt.Sprintf(":%d", v.cfg.RDP.Port))
+		if v.cfg.RDP.Expose {
+			hostAddr := "127.0.0.1"
+			v.add("RDP exposed on host", networking.TestPort(hostAddr, fmt.Sprintf("%d", v.cfg.RDP.Port)), fmt.Sprintf("%s:%d", v.cfg.RDP.BindHost, v.cfg.RDP.Port))
+		}
 		v.checkRemote("Desktop session working", "test -x /home/alfaos/.xsession && grep -q xfce /home/alfaos/.xsession && echo ok")
 	}
 

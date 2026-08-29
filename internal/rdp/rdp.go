@@ -90,6 +90,13 @@ RESSCRIPT
 chmod +x /home/alfaos/.local/bin/alfaos-set-resolution.sh
 sudo chown alfaos:alfaos /home/alfaos/.local/bin/alfaos-set-resolution.sh
 
+# Listen on all interfaces inside the VM
+if grep -q '^address=' /etc/xrdp/xrdp.ini 2>/dev/null; then
+  sudo sed -i 's/^address=.*/address=0.0.0.0/' /etc/xrdp/xrdp.ini
+else
+  sudo sed -i '/^\[Globals\]/a address=0.0.0.0' /etc/xrdp/xrdp.ini
+fi
+
 # rdesktop does not support drdynvc — keep it disabled for compatibility
 sudo sed -i 's/^drdynvc=.*/drdynvc=false/' /etc/xrdp/xrdp.ini 2>/dev/null || true
 

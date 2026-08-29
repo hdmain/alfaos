@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alfaos/alfaos/internal/config"
+	"github.com/alfaos/alfaos/internal/networking"
 )
 
 func Run(cfg *config.Config) error {
@@ -61,6 +62,22 @@ func Run(cfg *config.Config) error {
 }
 
 func ResolveVMIP(cfg *config.Config) (string, error) {
+	if cfg.RDP.Expose {
+		port := fmt.Sprintf("%d", cfg.RDP.Port)
+		if networking.TestPort("127.0.0.1", port) {
+			return "127.0.0.1", nil
+		}
+		rdpFile := filepath.Join(cfg.Paths.StateDir, "rdp.address")
+		if data, err := os.ReadFile(rdpFile); err == nil {
+			if ip := strings.TrimSpace(string(data)); ip != "" {
+				return ip, nil
+			}
+		}
+		if ip := networking.GetHostPrimaryIPv4(); ip != "" {
+			return ip, nil
+		}
+	}
+
 	ipFile := filepath.Join(cfg.Paths.StateDir, "vm.ip")
 	if data, err := os.ReadFile(ipFile); err == nil {
 		if ip := strings.TrimSpace(string(data)); ip != "" {

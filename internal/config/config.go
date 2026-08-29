@@ -43,9 +43,11 @@ type Config struct {
 	} `yaml:"alfaos"`
 
 	RDP struct {
-		Port   int `yaml:"port"`
-		Width  int `yaml:"width"`
-		Height int `yaml:"height"`
+		Port     int    `yaml:"port"`
+		Width    int    `yaml:"width"`
+		Height   int    `yaml:"height"`
+		Expose   bool   `yaml:"expose"`    // forward host port to VM (for VPS remote access)
+		BindHost string `yaml:"bind_host"` // host listen address, default 0.0.0.0
 	} `yaml:"rdp"`
 
 	Paths struct {
@@ -84,6 +86,8 @@ func Default() *Config {
 	c.RDP.Port = 3389
 	c.RDP.Width = 1920
 	c.RDP.Height = 1080
+	c.RDP.Expose = true
+	c.RDP.BindHost = "0.0.0.0"
 
 	c.Paths.ISOCache = "/var/lib/alfaos/iso"
 	c.Paths.PreseedDir = "/var/lib/alfaos/preseed"

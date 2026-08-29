@@ -194,6 +194,16 @@ func (i *Installer) Run(force bool) error {
 		_ = i.vm.WaitForSSH(vmIP, 5*time.Minute)
 	}
 
+	if i.cfg.RDP.Expose {
+		bind := i.cfg.RDP.BindHost
+		if bind == "" {
+			bind = "0.0.0.0"
+		}
+		if err := networking.ExposeRDP(i.cfg.Paths.StateDir, bind, i.cfg.RDP.Port, vmIP, i.cfg.RDP.Port); err != nil {
+			logging.Warn("RDP port forward: %v", err)
+		}
+	}
+
 	// Step 12: Verification
 	logging.Step(12, totalSteps, "Running verification tests")
 	verifier := verification.New(i.cfg, i.vm, vmIP)
@@ -207,6 +217,11 @@ func (i *Installer) Run(force bool) error {
 
 	i.printFinalReport(vmIP, passed, verifier.FailedComponents())
 	_ = os.WriteFile(filepath.Join(i.cfg.Paths.StateDir, "vm.ip"), []byte(vmIP), 0644)
+	_ = os.WriteFile(filepath.Join(i.cfg.Paths.StateDir, "vm.name"), []byte(i.cfg.VM.Name), 0644)
+	if i.cfg.RDP.Expose {
+		rdpAddr := networking.RDPConnectAddress(i.cfg.RDP.Port, true, vmIP)
+		_ = os.WriteFile(filepath.Join(i.cfg.Paths.StateDir, "rdp.address"), []byte(rdpAddr), 0644)
+	}
 	if !passed {
 		return fmt.Errorf("ALFAOS installation completed with verification failures")
 	}
@@ -236,10 +251,23 @@ func (i *Installer) buildRepairFuncs(vmIP string) map[string]func() error {
 		"Desktop session working": func() error {
 			return i.rdpCfg.Install(vmIP)
 		},
+		"RDP port reachable": func() error {
+			if i.cfg.RDP.Expose {
+				return networking.ExposeRDP(i.cfg.Paths.StateDir, i.cfg.RDP.BindHost, i.cfg.RDP.Port, vmIP, i.cfg.RDP.Port)
+			}
+			return nil
+		},
 	}
 }
 
 func (i *Installer) printFinalReport(vmIP string, passed bool, failed []string) {
+	rdpHost := vmIP
+	if i.cfg.RDP.Expose {
+		if addr := networking.RDPConnectAddress(i.cfg.RDP.Port, true, vmIP); addr != "" {
+			rdpHost = addr
+		}
+	}
+
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════")
 	if passed {
@@ -251,14 +279,21 @@ func (i *Installer) printFinalReport(vmIP string, passed bool, failed []string) 
 	fmt.Println()
 	fmt.Printf("  VM Name:     %s\n", i.cfg.VM.Name)
 	fmt.Printf("  VM IP:       %s\n", vmIP)
-	fmt.Printf("  RDP Address: %s:%d\n", vmIP, i.cfg.RDP.Port)
+	fmt.Printf("  RDP Address: %s:%d\n", rdpHost, i.cfg.RDP.Port)
+	if i.cfg.RDP.Expose && rdpHost != vmIP {
+		bind := i.cfg.RDP.BindHost
+		if bind == "" {
+			bind = "0.0.0.0"
+		}
+		fmt.Printf("  (forwarded from %s:%d on host)\n", bind, i.cfg.RDP.Port)
+	}
 	fmt.Printf("  Username:    %s\n", i.cfg.ALFAOS.Username)
 	fmt.Printf("  Password:    %s\n", i.cfg.ALFAOS.Password)
 	fmt.Println()
 	fmt.Println("  Connect with any RDP client:")
 	fmt.Printf("    alfaos connect                    # %s, recommended\n", i.cfg.RDPResolution())
-	fmt.Printf("    xfreerdp /v:%s /u:%s /p:%s /size:%s\n", vmIP, i.cfg.ALFAOS.Username, i.cfg.ALFAOS.Password, i.cfg.RDPResolution())
-	fmt.Printf("    rdesktop %s -u %s -p %s -g %s\n", vmIP, i.cfg.ALFAOS.Username, i.cfg.ALFAOS.Password, i.cfg.RDPResolution())
+	fmt.Printf("    xfreerdp /v:%s /u:%s /p:%s /size:%s\n", rdpHost, i.cfg.ALFAOS.Username, i.cfg.ALFAOS.Password, i.cfg.RDPResolution())
+	fmt.Printf("    rdesktop %s -u %s -p %s -g %s\n", rdpHost, i.cfg.ALFAOS.Username, i.cfg.ALFAOS.Password, i.cfg.RDPResolution())
 	fmt.Println()
 
 	if !passed {
