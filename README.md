@@ -7,13 +7,13 @@ Automated Linux Framework for Alpha OS — a Go-based CLI that installs and conf
 Install the CLI (build from source on your machine):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/freeman/alfaos/main/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/alfaos/alfaos/main/scripts/install.sh | sudo bash
 ```
 
 Full automated install (CLI + KVM VM + XFCE desktop + RDP):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/freeman/alfaos/main/scripts/install.sh | sudo bash -s -- --full
+curl -fsSL https://raw.githubusercontent.com/alfaos/alfaos/main/scripts/install.sh | sudo bash -s -- --full
 ```
 
 Then connect:
@@ -25,7 +25,7 @@ alfaos connect
 ## Quick Start (from source)
 
 ```bash
-git clone https://github.com/freeman/alfaos.git
+git clone https://github.com/alfaos/alfaos.git
 cd alfaos
 ./scripts/build.sh
 sudo alfaos install
