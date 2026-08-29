@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# ALFAOS one-line installer — https://github.com/alfaos/alfaos
+# ALFAOS one-line installer — https://github.com/hdmain/alfaos
 set -euo pipefail
 
-REPO="${ALFAOS_REPO:-https://github.com/alfaos/alfaos.git}"
+REPO="${ALFAOS_REPO:-https://github.com/hdmain/alfaos.git}"
 BRANCH="${ALFAOS_BRANCH:-main}"
 INSTALL_DIR="${ALFAOS_INSTALL_DIR:-/tmp/alfaos-src-$$}"
 RUN_FULL=false
@@ -12,7 +12,7 @@ usage() {
 ALFAOS installer
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/alfaos/alfaos/main/scripts/install.sh | sudo bash
+  curl -fsSL https://raw.githubusercontent.com/hdmain/alfaos/main/scripts/install.sh | sudo bash
   curl -fsSL ... | sudo bash -s -- --full
 
 Options:

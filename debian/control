@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: ALFAOS <alfaos@localhost>
 Build-Depends: debhelper-compat (= 13), golang-go (>= 1.22)
 Standards-Version: 4.6.2
-Homepage: https://github.com/alfaos/alfaos
+Homepage: https://github.com/hdmain/alfaos
 Rules-Requires-Root: no
 
 Package: alfaos

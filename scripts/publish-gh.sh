@@ -7,7 +7,7 @@ cd "$ROOT"
 
 gh auth status
 
-REPO_SLUG="${ALFAOS_GH_REPO:-alfaos/alfaos}"
+REPO_SLUG="${ALFAOS_GH_REPO:-hdmain/alfaos}"
 DESC="Automated KVM/Debian/XFCE/RDP installer — ALFAOS"
 
 if git remote get-url origin >/dev/null 2>&1; then
