@@ -21,21 +21,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build Linux binaries
+      - name: Verify build
         run: |
           set -euo pipefail
-          mkdir -p dist
+          go test ./...
           VERSION="$(git rev-parse --short HEAD)"
           LDFLAGS="-s -w -X main.version=${VERSION}"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -ldflags="${LDFLAGS}" -o dist/alfaos-linux-amd64 ./cmd/alfaos/
+            go build -ldflags="${LDFLAGS}" -o /tmp/alfaos-linux-amd64 ./cmd/alfaos/
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-            go build -ldflags="${LDFLAGS}" -o dist/alfaos-linux-arm64 ./cmd/alfaos/
-          sha256sum dist/alfaos-linux-* > dist/SHA256SUMS
-          ls -lh dist/
-          git diff --exit-code dist/ || {
-            echo "::error::dist/ is out of date — rebuild locally and commit:"
-            echo "  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags=\"-s -w\" -o dist/alfaos-linux-amd64 ./cmd/alfaos/"
-            echo "  CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags=\"-s -w\" -o dist/alfaos-linux-arm64 ./cmd/alfaos/"
-            exit 1
-          }
+            go build -ldflags="${LDFLAGS}" -o /tmp/alfaos-linux-arm64 ./cmd/alfaos/
+          /tmp/alfaos-linux-amd64 version
+          file /tmp/alfaos-linux-amd64 /tmp/alfaos-linux-arm64
