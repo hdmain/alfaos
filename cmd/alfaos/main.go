@@ -115,9 +115,15 @@ func runExposeRDP(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	host := networking.RDPConnectAddress(cfg.RDP.Port, true, vmIP)
-	fmt.Printf("RDP exposed: %s:%d → VM %s:%d\n", bind, cfg.RDP.Port, vmIP, cfg.RDP.Port)
+	fmt.Printf("RDP proxy: %s:%d → VM %s:%d\n", bind, cfg.RDP.Port, vmIP, cfg.RDP.Port)
+	if networking.TestPort("127.0.0.1", fmt.Sprintf("%d", cfg.RDP.Port)) {
+		fmt.Printf("Local check OK: port %d is listening on host\n", cfg.RDP.Port)
+	} else {
+		fmt.Printf("WARNING: port %d not listening — run: systemctl status alfaos-rdp-forward\n", cfg.RDP.Port)
+	}
 	if host != "" && host != vmIP {
-		fmt.Printf("Connect from outside: rdesktop %s -u %s -p %s\n", host, cfg.ALFAOS.Username, cfg.ALFAOS.Password)
+		fmt.Printf("Connect from outside: rdesktop %s -u %s -p %s -g %s\n", host, cfg.ALFAOS.Username, cfg.ALFAOS.Password, cfg.RDPResolution())
+		fmt.Printf("If that fails, open TCP %d in your VPS provider firewall\n", cfg.RDP.Port)
 	}
 	return nil
 }

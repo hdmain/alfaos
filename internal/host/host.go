@@ -234,7 +234,7 @@ func installAptPackages() error {
 		"virtinst", "bridge-utils", "genisoimage", "wget", "curl",
 		"openssh-client", "sshpass", "qemu-system-x86", "libvirt-daemon",
 		"libvirt-daemon-driver-qemu", "libguestfs-tools", "dnsmasq-base",
-		"iproute2", "netcat-openbsd",
+		"iproute2", "netcat-openbsd", "socat",
 	}
 	optionalRDP := []string{"rdesktop", "freerdp3-x11", "freerdp2-x11"}
 
@@ -269,7 +269,7 @@ func hostPackagesForPM(pm string) []string {
 		return append(common,
 			"qemu-system-x86", "libvirt-daemon", "libvirt-daemon-driver-qemu",
 			"libguestfs-tools", "dnsmasq-base", "iproute2", "netcat-openbsd",
-			"rdesktop",
+			"rdesktop", "socat",
 		)
 	case "dnf":
 		return []string{

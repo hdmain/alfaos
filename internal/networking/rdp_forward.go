@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	hostpkg "github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
 )
 
-// ExposeRDP forwards hostPort on bindAddr to the VM RDP port via iptables NAT.
+// ExposeRDP listens on bindAddr:hostPort and proxies TCP to the VM RDP port.
 func ExposeRDP(stateDir, bindAddr string, hostPort int, vmIP string, vmPort int) error {
 	if hostPort <= 0 {
 		hostPort = 3389
@@ -22,57 +23,80 @@ func ExposeRDP(stateDir, bindAddr string, hostPort int, vmIP string, vmPort int)
 		bindAddr = "0.0.0.0"
 	}
 
-	logging.Info("Exposing RDP on %s:%d → VM %s:%d", bindAddr, hostPort, vmIP, vmPort)
+	logging.Info("Exposing RDP on %s:%d → VM %s:%d (socat proxy)", bindAddr, hostPort, vmIP, vmPort)
 
-	_, _ = hostpkg.RunCommand("sysctl", "-w", "net.ipv4.ip_forward=1")
-
-	if hostpkg.CommandExists("ufw") {
-		_, _ = hostpkg.RunCommand("ufw", "allow", fmt.Sprintf("%d/tcp", hostPort))
+	if err := ensureSocat(); err != nil {
+		return err
 	}
 
-	applyRules(bindAddr, hostPort, vmIP, vmPort)
+	removeLegacyIPTables(hostPort, vmIP, vmPort)
+	allowHostPort(hostPort)
 
-	if err := writeForwardScripts(stateDir, bindAddr, hostPort, vmPort); err != nil {
-		logging.Warn("Could not persist RDP forward rules: %v", err)
-	} else if err := installForwardService(stateDir); err != nil {
-		logging.Warn("Could not install RDP forward service: %v", err)
+	if !TestPort(vmIP, fmt.Sprintf("%d", vmPort)) {
+		logging.Warn("VM RDP at %s:%d is not reachable from host yet", vmIP, vmPort)
+	} else {
+		logging.Info("VM RDP reachable at %s:%d", vmIP, vmPort)
 	}
 
-	logging.Success("RDP exposed on %s:%d (connect from outside with host IP)", bindAddr, hostPort)
+	if err := writeSocatScripts(stateDir, bindAddr, hostPort, vmPort); err != nil {
+		return fmt.Errorf("write socat scripts: %w", err)
+	}
+	if err := installSocatService(stateDir, bindAddr, hostPort); err != nil {
+		return fmt.Errorf("install socat service: %w", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	if TestPort("127.0.0.1", fmt.Sprintf("%d", hostPort)) {
+		logging.Success("RDP proxy listening on %s:%d", bindAddr, hostPort)
+	} else {
+		logging.Warn("RDP proxy may not be listening — check: systemctl status alfaos-rdp-forward")
+	}
+
+	printExposureHints(hostPort)
 	return nil
 }
 
-func applyRules(bindAddr string, hostPort int, vmIP string, vmPort int) {
-	vmDest := fmt.Sprintf("%s:%d", vmIP, vmPort)
-	portStr := fmt.Sprintf("%d", hostPort)
-
-	// Incoming connections to the host (external clients).
-	iptablesEnsure("nat", "PREROUTING",
-		"-p", "tcp", "--dport", portStr,
-		"-j", "DNAT", "--to-destination", vmDest)
-
-	// Connections from the host itself (alfaos connect via localhost/public IP).
-	if bindAddr == "0.0.0.0" || bindAddr == "" {
-		iptablesEnsure("nat", "OUTPUT",
-			"-p", "tcp", "--dport", portStr,
-			"-m", "addrtype", "--dst-type", "LOCAL",
-			"-j", "DNAT", "--to-destination", vmDest)
-	} else {
-		iptablesEnsure("nat", "OUTPUT",
-			"-p", "tcp", "-d", bindAddr, "--dport", portStr,
-			"-j", "DNAT", "--to-destination", vmDest)
+func ensureSocat() error {
+	if hostpkg.CommandExists("socat") {
+		return nil
 	}
+	logging.Info("Installing socat for RDP proxy...")
+	if _, err := hostpkg.RunCommand("apt-get", "install", "-y", "-qq", "--no-install-recommends", "socat"); err != nil {
+		_, err = hostpkg.RunCommand("apt-get", "-o", "Dir::Etc::sourceparts=/dev/null", "install", "-y", "-qq", "--no-install-recommends", "socat")
+		if err != nil {
+			return fmt.Errorf("install socat: %w", err)
+		}
+	}
+	return nil
+}
 
-	iptablesEnsure("nat", "POSTROUTING",
-		"-p", "tcp", "-d", vmIP, "--dport", fmt.Sprintf("%d", vmPort),
-		"-j", "MASQUERADE")
+func allowHostPort(port int) {
+	portStr := fmt.Sprintf("%d", port)
+	if hostpkg.CommandExists("ufw") {
+		out, _ := hostpkg.RunCommand("ufw", "status")
+		if strings.Contains(strings.ToLower(out), "active") {
+			_, _ = hostpkg.RunCommand("ufw", "allow", portStr+"/tcp")
+			logging.Info("Opened port %s/tcp in ufw", portStr)
+		}
+	}
+	iptablesEnsure("filter", "INPUT", "-p", "tcp", "--dport", portStr, "-j", "ACCEPT")
+}
 
-	iptablesEnsure("filter", "FORWARD",
-		"-p", "tcp", "-d", vmIP, "--dport", fmt.Sprintf("%d", vmPort),
-		"-m", "state", "--state", "NEW,ESTABLISHED,RELATED", "-j", "ACCEPT")
-	iptablesEnsure("filter", "FORWARD",
-		"-p", "tcp", "-s", vmIP, "--sport", fmt.Sprintf("%d", vmPort),
-		"-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT")
+func removeLegacyIPTables(hostPort int, vmIP string, vmPort int) {
+	portStr := fmt.Sprintf("%d", hostPort)
+	vmPortStr := fmt.Sprintf("%d", vmPort)
+	vmDest := fmt.Sprintf("%s:%s", vmIP, vmPortStr)
+
+	legacy := [][]string{
+		{"nat", "PREROUTING", "-p", "tcp", "--dport", portStr, "-j", "DNAT", "--to-destination", vmDest},
+		{"nat", "OUTPUT", "-p", "tcp", "--dport", portStr, "-m", "addrtype", "--dst-type", "LOCAL", "-j", "DNAT", "--to-destination", vmDest},
+		{"nat", "POSTROUTING", "-p", "tcp", "-d", vmIP, "--dport", vmPortStr, "-j", "MASQUERADE"},
+		{"filter", "FORWARD", "-p", "tcp", "-d", vmIP, "--dport", vmPortStr, "-m", "state", "--state", "NEW,ESTABLISHED,RELATED", "-j", "ACCEPT"},
+		{"filter", "FORWARD", "-p", "tcp", "-s", vmIP, "--sport", vmPortStr, "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
+	}
+	for _, rule := range legacy {
+		iptablesDelete(rule[0], rule[1], rule[2:]...)
+	}
 }
 
 func iptablesEnsure(table, chain string, args ...string) {
@@ -84,9 +108,13 @@ func iptablesEnsure(table, chain string, args ...string) {
 	_, _ = hostpkg.RunCommand("iptables", addArgs...)
 }
 
-func writeForwardScripts(stateDir, bindAddr string, hostPort, vmPort int) error {
-	applyPath := filepath.Join(stateDir, "apply-rdp-forward.sh")
-	removePath := filepath.Join(stateDir, "remove-rdp-forward.sh")
+func iptablesDelete(table, chain string, args ...string) {
+	delArgs := append([]string{"-t", table, "-D", chain}, args...)
+	_, _ = hostpkg.RunCommand("iptables", delArgs...)
+}
+
+func writeSocatScripts(stateDir, bindAddr string, hostPort, vmPort int) error {
+	runPath := filepath.Join(stateDir, "run-rdp-proxy.sh")
 	ipFile := filepath.Join(stateDir, "vm.ip")
 	vmNameFile := filepath.Join(stateDir, "vm.name")
 
@@ -97,7 +125,12 @@ func writeForwardScripts(stateDir, bindAddr string, hostPort, vmPort int) error 
 		}
 	}
 
-	applyScript := fmt.Sprintf(`#!/bin/bash
+	bindOpt := ""
+	if bindAddr != "" && bindAddr != "0.0.0.0" {
+		bindOpt = fmt.Sprintf(",bind=%s", bindAddr)
+	}
+
+	script := fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
 VM_IP=""
 if [ -f %q ]; then
@@ -107,101 +140,33 @@ if [ -z "$VM_IP" ]; then
   VM_IP=$(virsh domifaddr %q 2>/dev/null | awk '/ipv4/ {gsub(/\/.*/,"",$4); print $4; exit}')
 fi
 if [ -z "$VM_IP" ]; then
-  echo "ALFAOS: could not resolve VM IP for RDP forward" >&2
+  echo "ALFAOS: could not resolve VM IP for RDP proxy" >&2
   exit 1
 fi
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
-%s
-`, ipFile, ipFile, vmName, forwardRuleShell(bindAddr, hostPort, vmPort, "$VM_IP"))
+exec /usr/bin/socat TCP-LISTEN:%d,reuseaddr,fork%s TCP:${VM_IP}:%d
+`, ipFile, ipFile, vmName, hostPort, bindOpt, vmPort)
 
-	removeScript := fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
-VM_IP=""
-if [ -f %q ]; then
-  VM_IP=$(tr -d '[:space:]' < %q)
-fi
-if [ -z "$VM_IP" ]; then
-  VM_IP=$(virsh domifaddr %q 2>/dev/null | awk '/ipv4/ {gsub(/\/.*/,"",$4); print $4; exit}')
-fi
-[ -n "$VM_IP" ] || exit 0
-%s
-`, ipFile, ipFile, vmName, removeRuleShell(bindAddr, hostPort, vmPort, "$VM_IP"))
-
-	if err := os.WriteFile(applyPath, []byte(applyScript), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(removePath, []byte(removeScript), 0755)
+	return os.WriteFile(runPath, []byte(script), 0755)
 }
 
-func forwardRuleShell(bindAddr string, hostPort, vmPort int, vmIPVar string) string {
-	portStr := fmt.Sprintf("%d", hostPort)
-	vmPortStr := fmt.Sprintf("%d", vmPort)
-	lines := []string{
-		fmt.Sprintf(`iptables -t nat -C PREROUTING -p tcp --dport %s -j DNAT --to-destination %s:%s 2>/dev/null || \
-iptables -t nat -A PREROUTING -p tcp --dport %s -j DNAT --to-destination %s:%s`, portStr, vmIPVar, vmPortStr, portStr, vmIPVar, vmPortStr),
-	}
-	if bindAddr == "0.0.0.0" || bindAddr == "" {
-		lines = append(lines,
-			fmt.Sprintf(`iptables -t nat -C OUTPUT -p tcp --dport %s -m addrtype --dst-type LOCAL -j DNAT --to-destination %s:%s 2>/dev/null || \
-iptables -t nat -A OUTPUT -p tcp --dport %s -m addrtype --dst-type LOCAL -j DNAT --to-destination %s:%s`, portStr, vmIPVar, vmPortStr, portStr, vmIPVar, vmPortStr),
-		)
-	} else {
-		lines = append(lines,
-			fmt.Sprintf(`iptables -t nat -C OUTPUT -p tcp -d %s --dport %s -j DNAT --to-destination %s:%s 2>/dev/null || \
-iptables -t nat -A OUTPUT -p tcp -d %s --dport %s -j DNAT --to-destination %s:%s`, bindAddr, portStr, vmIPVar, vmPortStr, bindAddr, portStr, vmIPVar, vmPortStr),
-		)
-	}
-	lines = append(lines,
-		fmt.Sprintf(`iptables -t nat -C POSTROUTING -p tcp -d %s --dport %s -j MASQUERADE 2>/dev/null || \
-iptables -t nat -A POSTROUTING -p tcp -d %s --dport %s -j MASQUERADE`, vmIPVar, vmPortStr, vmIPVar, vmPortStr),
-		fmt.Sprintf(`iptables -C FORWARD -p tcp -d %s --dport %s -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
-iptables -A FORWARD -p tcp -d %s --dport %s -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT`, vmIPVar, vmPortStr, vmIPVar, vmPortStr),
-		fmt.Sprintf(`iptables -C FORWARD -p tcp -s %s --sport %s -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
-iptables -A FORWARD -p tcp -s %s --sport %s -m state --state ESTABLISHED,RELATED -j ACCEPT`, vmIPVar, vmPortStr, vmIPVar, vmPortStr),
-	)
-	return strings.Join(lines, "\n")
-}
-
-func removeRuleShell(bindAddr string, hostPort, vmPort int, vmIPVar string) string {
-	portStr := fmt.Sprintf("%d", hostPort)
-	vmPortStr := fmt.Sprintf("%d", vmPort)
-	lines := []string{
-		fmt.Sprintf(`iptables -t nat -D PREROUTING -p tcp --dport %s -j DNAT --to-destination %s:%s 2>/dev/null || true`, portStr, vmIPVar, vmPortStr),
-	}
-	if bindAddr == "0.0.0.0" || bindAddr == "" {
-		lines = append(lines,
-			fmt.Sprintf(`iptables -t nat -D OUTPUT -p tcp --dport %s -m addrtype --dst-type LOCAL -j DNAT --to-destination %s:%s 2>/dev/null || true`, portStr, vmIPVar, vmPortStr),
-		)
-	} else {
-		lines = append(lines,
-			fmt.Sprintf(`iptables -t nat -D OUTPUT -p tcp -d %s --dport %s -j DNAT --to-destination %s:%s 2>/dev/null || true`, bindAddr, portStr, vmIPVar, vmPortStr),
-		)
-	}
-	lines = append(lines,
-		fmt.Sprintf(`iptables -t nat -D POSTROUTING -p tcp -d %s --dport %s -j MASQUERADE 2>/dev/null || true`, vmIPVar, vmPortStr),
-		fmt.Sprintf(`iptables -D FORWARD -p tcp -d %s --dport %s -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true`, vmIPVar, vmPortStr),
-		fmt.Sprintf(`iptables -D FORWARD -p tcp -s %s --sport %s -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true`, vmIPVar, vmPortStr),
-	)
-	return strings.Join(lines, "\n")
-}
-
-func installForwardService(stateDir string) error {
+func installSocatService(stateDir, bindAddr string, hostPort int) error {
 	unitPath := "/etc/systemd/system/alfaos-rdp-forward.service"
-	applyPath := filepath.Join(stateDir, "apply-rdp-forward.sh")
+	runPath := filepath.Join(stateDir, "run-rdp-proxy.sh")
+
 	unit := fmt.Sprintf(`[Unit]
-Description=ALFAOS RDP port forward to VM
+Description=ALFAOS RDP TCP proxy to VM (socat)
 After=network-online.target libvirtd.service
 Wants=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
+Restart=on-failure
+RestartSec=3
 ExecStart=%s
-ExecStop=%s
 
 [Install]
 WantedBy=multi-user.target
-`, applyPath, filepath.Join(stateDir, "remove-rdp-forward.sh"))
+`, runPath)
 
 	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
 		return err
@@ -210,6 +175,14 @@ WantedBy=multi-user.target
 	_, _ = hostpkg.RunCommand("systemctl", "enable", "alfaos-rdp-forward.service")
 	_, _ = hostpkg.RunCommand("systemctl", "restart", "alfaos-rdp-forward.service")
 	return nil
+}
+
+func printExposureHints(hostPort int) {
+	if ip := GetHostPrimaryIPv4(); ip != "" {
+		logging.Info("Connect from outside: rdesktop %s -u alfaos -p alfaos -g 1920x1080", ip)
+	}
+	logging.Info("Verify on VPS: ss -tlnp | grep %d", hostPort)
+	logging.Info("If external connect still fails, open TCP %d in your VPS provider firewall/panel", hostPort)
 }
 
 // GetHostPrimaryIPv4 returns the primary outbound IPv4 address of this host.
