@@ -202,7 +202,7 @@ func InstallHostPackages(pm string) error {
 	switch pm {
 	case "apt":
 		if _, err := RunCommand("apt-get", "update", "-qq"); err != nil {
-			return err
+			logging.Warn("apt-get update failed (broken third-party repos?) — continuing: %v", err)
 		}
 		args := append([]string{"install", "-y", "-qq"}, packages...)
 		_, err := RunCommand("apt-get", args...)

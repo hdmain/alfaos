@@ -49,19 +49,39 @@ need() {
 install_deps() {
   local missing=()
   need curl || missing+=(curl)
-  need unzip || missing+=(unzip)
   [ "${#missing[@]}" -eq 0 ] && return 0
 
   echo "==> Installing: ${missing[*]}..."
   if need apt-get; then
-    apt-get update -qq
-    apt-get install -y -qq ca-certificates "${missing[@]}"
+    # Skip apt-get update — broken third-party repos (e.g. Docker) must not block install
+    apt-get install -y -qq --no-install-recommends ca-certificates "${missing[@]}" || {
+      echo "error: could not install ${missing[*]} (fix apt sources or install manually)" >&2
+      exit 1
+    }
   elif need dnf; then
     dnf install -y ca-certificates "${missing[@]}"
   elif need pacman; then
     pacman -Sy --noconfirm ca-certificates "${missing[@]}"
   else
     echo "error: install ${missing[*]}, then re-run" >&2
+    exit 1
+  fi
+}
+
+ensure_unzip() {
+  need unzip && return 0
+  echo "==> Installing: unzip..."
+  if need apt-get; then
+    apt-get install -y -qq --no-install-recommends unzip || {
+      echo "error: install unzip manually: apt-get install -y unzip" >&2
+      exit 1
+    }
+  elif need dnf; then
+    dnf install -y unzip
+  elif need pacman; then
+    pacman -Sy --noconfirm unzip
+  else
+    echo "error: unzip required for fallback download" >&2
     exit 1
   fi
 }
@@ -86,15 +106,17 @@ github_repo_name() {
 }
 
 install_binary_from_pages() {
-  local arch bin url tmp owner repo
+  local arch bin url tmp owner repo sha
   arch="$(detect_arch)"
   bin="alfaos-linux-${arch}"
   owner="$(github_user)"
   repo="$(github_repo_name)"
+  sha="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/commits/${BRANCH}" | sed -n 's/.*"sha": "\([a-f0-9]*\)".*/\1/p' | head -1)"
   url="https://${owner}.github.io/${repo}/${bin}"
+  [ -n "$sha" ] && url="${url}?v=${sha}"
   tmp="$(mktemp)"
 
-  echo "==> Downloading ${bin} from GitHub Pages..."
+  echo "==> Downloading ${bin} from GitHub Pages (${sha:-latest})..."
   curl -fsSL "$url" -o "$tmp"
   install -m 755 "$tmp" /usr/local/bin/alfaos
   rm -f "$tmp"
@@ -103,6 +125,7 @@ install_binary_from_pages() {
 
 install_binary_from_actions() {
   local arch bin artifact url tmpdir
+  ensure_unzip
   arch="$(detect_arch)"
   bin="alfaos-linux-${arch}"
   artifact="${bin}"
@@ -124,9 +147,10 @@ install_binary_from_actions() {
 }
 
 install_binary() {
-  if install_binary_from_pages 2>/dev/null; then
+  if install_binary_from_pages; then
     return 0
   fi
+  echo "==> GitHub Pages failed, trying Actions artifact..."
   install_binary_from_actions
 }
 
