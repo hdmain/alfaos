@@ -75,6 +75,9 @@ func (i *Installer) Run(force bool) error {
 	if err := networking.ConfigureLibvirt(); err != nil {
 		return fmt.Errorf("network config: %w", err)
 	}
+	if err := networking.ConfigureLibvirtDNS(i.cfg.VM.Network, i.cfg.DNSServers()); err != nil {
+		logging.Warn("Libvirt DNS config: %v", err)
+	}
 
 	// Step 6: Ensure state directories
 	if err := i.cfg.EnsureDirs(); err != nil {

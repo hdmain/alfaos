@@ -37,6 +37,12 @@ power:
   idle_shutdown_minutes: 15   # 0 = never auto-shutdown
   wake_on_rdp: true
 
+# AdGuard DNS — blocks ads, trackers, and phishing; no query logs (https://adguard-dns.io)
+dns:
+  servers:
+    - 94.140.14.14
+    - 94.140.15.15
+
 paths:
   iso_cache: /var/lib/alfaos/iso
   preseed_dir: /var/lib/alfaos/preseed

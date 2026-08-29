@@ -7,6 +7,7 @@ import (
 
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/logging"
+	"github.com/alfaos/alfaos/internal/networking"
 	"github.com/alfaos/alfaos/internal/virtualization"
 )
 
@@ -33,6 +34,15 @@ func (d *Configurator) InstallScript() string {
 	wallPath := "/usr/share/backgrounds/alfaos/" + wallpaper
 	themePackages := themePackages(theme)
 	terminalPkg := terminalPackage(d.cfg.ALFAOS.Terminal)
+	dhcpDNS := networking.GuestDHCPDNSLine(d.cfg.DNSServers())
+	resolvConf := networking.GuestResolvConf(d.cfg.DNSServers())
+	dnsConfig := fmt.Sprintf(`
+echo "==> Configuring privacy DNS (AdGuard — blocks ads and trackers)..."
+grep -q 'supersede domain-name-servers' /etc/dhcp/dhclient.conf 2>/dev/null || \
+  echo '%s' | sudo tee -a /etc/dhcp/dhclient.conf >/dev/null
+sudo tee /etc/resolv.conf >/dev/null << 'RESOLV'
+%sRESOLV
+`, dhcpDNS, resolvConf)
 
 	tilixConfig := ""
 	if strings.ToLower(d.cfg.ALFAOS.Terminal) != "xfce4-terminal" && d.cfg.ALFAOS.Terminal != "xfce" {
@@ -122,6 +132,8 @@ sudo apt-get install -y -qq \
     lightdm \
     dbus-x11 \
     net-tools
+
+%s
 
 %s
 
@@ -337,7 +349,7 @@ sudo chown -R alfaos:alfaos /home/alfaos/.config /home/alfaos/.local
 
 echo "==> ALFAOS desktop configuration complete."
 `, strings.Join(themePackages, " "), terminalPkg, plankInstall, browserInstall,
-		terminalPkg, terminalPkg, tilixConfig, plankConfig, panelConfig,
+		dnsConfig, terminalPkg, terminalPkg, tilixConfig, plankConfig, panelConfig,
 		gtkTheme, iconTheme, wmTheme, wallPath, wallPath,
 		gtkTheme, iconTheme, gtkTheme, iconTheme, iconTheme,
 		gtkTheme, wmTheme, iconTheme, wallPath)

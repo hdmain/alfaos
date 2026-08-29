@@ -9,6 +9,7 @@ import (
 
 	"github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
+	"github.com/alfaos/alfaos/internal/networking"
 )
 
 var reRootUUID = regexp.MustCompile(`UUID=([0-9a-f-]+)\s+/`)
@@ -51,9 +52,15 @@ func (m *Manager) SetupDirectKernelBoot() error {
 		return fmt.Errorf("copy initrd: %w", err)
 	}
 
-	// Fix network and passwordless sudo for automated remote setup scripts.
+	// Fix network, DNS, and passwordless sudo for automated remote setup scripts.
+	servers := m.cfg.DNSServers()
+	ifaces := networking.GuestInterfacesEth0(servers)
+	dhcpDNS := networking.GuestDHCPDNSLine(servers)
+	resolv := networking.GuestResolvConf(servers)
 	if _, err := host.RunCommand("virt-customize", "-d", m.cfg.VM.Name,
-		"--run-command", `printf "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n" > /etc/network/interfaces`,
+		"--run-command", fmt.Sprintf("printf %s > /etc/network/interfaces", shellQuote(ifaces)),
+		"--run-command", fmt.Sprintf(`grep -q 'supersede domain-name-servers' /etc/dhcp/dhclient.conf 2>/dev/null || echo %s >> /etc/dhcp/dhclient.conf`, shellQuote(dhcpDNS)),
+		"--run-command", fmt.Sprintf("printf %s > /etc/resolv.conf", shellQuote(resolv)),
 		"--run-command", `echo "alfaos ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/alfaos && chmod 440 /etc/sudoers.d/alfaos`); err != nil {
 		logging.Warn("VM customize (network/sudo): %v", err)
 	}
@@ -167,4 +174,8 @@ func injectDirectKernelBoot(xml, kernel, initrd, cmdline string) string {
 		}
 		return parts[1] + "\n    " + inner + kernelBlock + "\n  " + parts[3]
 	})
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

@@ -90,7 +90,16 @@ alfaos:
 power:
   idle_shutdown_minutes: 15   # shut down VM when no RDP sessions (0 = never)
   wake_on_rdp: true           # start VM when any RDP client connects to the host
+
+dns:
+  servers:
+    - 94.140.14.14   # AdGuard DNS — blocks ads/trackers (https://adguard-dns.io)
+    - 94.140.15.15
 ```
+
+### Privacy DNS (AdGuard)
+
+By default ALFAOS uses **AdGuard DNS** in the VM and on the libvirt NAT network. It blocks ads, trackers, and phishing without logging your queries. Override `dns.servers` in config to use another resolver.
 
 ### Power saving (wake-on-RDP)
 

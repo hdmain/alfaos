@@ -16,6 +16,7 @@ import (
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
+	"github.com/alfaos/alfaos/internal/networking"
 )
 
 type Installer struct {
@@ -299,7 +300,9 @@ d-i preseed/late_command string \
     in-target sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config; \
     in-target sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config; \
     in-target sed -i 's/#KbdInteractiveAuthentication.*/KbdInteractiveAuthentication yes/' /etc/ssh/sshd_config; \
-    in-target sh -c 'printf "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n" > /etc/network/interfaces'; \
+    in-target sh -c 'printf "{{.InterfacesPrintf}}" > /etc/network/interfaces'; \
+    in-target sh -c 'grep -q "supersede domain-name-servers" /etc/dhcp/dhclient.conf 2>/dev/null || echo "{{.DHCPDNSLine}}" >> /etc/dhcp/dhclient.conf'; \
+    in-target sh -c 'printf "{{.ResolvConfPrintf}}" > /etc/resolv.conf'; \
     in-target sh -c 'echo "alfaos ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/alfaos && chmod 440 /etc/sudoers.d/alfaos'; \
     in-target systemctl restart ssh
 `
@@ -318,13 +321,19 @@ func (d *Installer) GeneratePreseed() (string, error) {
 	defer f.Close()
 
 	data := struct {
-		Hostname string
-		Username string
-		Password string
+		Hostname         string
+		Username         string
+		Password         string
+		InterfacesPrintf string
+		DHCPDNSLine      string
+		ResolvConfPrintf string
 	}{
 		d.cfg.ALFAOS.Hostname,
 		d.cfg.ALFAOS.Username,
 		d.cfg.ALFAOS.Password,
+		printfEscaped(networking.GuestInterfacesEth0(d.cfg.DNSServers())),
+		networking.GuestDHCPDNSLine(d.cfg.DNSServers()),
+		printfEscaped(networking.GuestResolvConf(d.cfg.DNSServers())),
 	}
 
 	if err := tmpl.Execute(f, data); err != nil {
@@ -365,4 +374,11 @@ func (d *Installer) BuildPreseedISO(preseedPath string) (string, error) {
 
 	logging.Success("Preseed ISO created at %s", isoPath)
 	return isoPath, nil
+}
+
+func printfEscaped(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
 }

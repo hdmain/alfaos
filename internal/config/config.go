@@ -56,6 +56,11 @@ type Config struct {
 		WakeOnRDP           bool `yaml:"wake_on_rdp"`           // start VM when a client connects to the host RDP port
 	} `yaml:"power"`
 
+	// DNS upstream for the VM (default: AdGuard — blocks ads/trackers, privacy-focused).
+	DNS struct {
+		Servers []string `yaml:"servers"` // empty = use AdGuard default blocking DNS
+	} `yaml:"dns"`
+
 	Paths struct {
 		ISOCache   string `yaml:"iso_cache"`
 		PreseedDir string `yaml:"preseed_dir"`
@@ -97,6 +102,9 @@ func Default() *Config {
 
 	c.Power.IdleShutdownMinutes = 15
 	c.Power.WakeOnRDP = true
+
+	// AdGuard DNS default — blocks ads, trackers, and phishing; no logging (https://adguard-dns.io)
+	c.DNS.Servers = []string{"94.140.14.14", "94.140.15.15"}
 
 	c.Paths.ISOCache = "/var/lib/alfaos/iso"
 	c.Paths.PreseedDir = "/var/lib/alfaos/preseed"
@@ -198,6 +206,14 @@ func (c *Config) RDPResolution() string {
 		h = 1080
 	}
 	return fmt.Sprintf("%dx%d", w, h)
+}
+
+// DNSServers returns configured DNS servers or AdGuard defaults when unset.
+func (c *Config) DNSServers() []string {
+	if len(c.DNS.Servers) > 0 {
+		return append([]string(nil), c.DNS.Servers...)
+	}
+	return []string{"94.140.14.14", "94.140.15.15"}
 }
 
 func (c *Config) EnsureDirs() error {
