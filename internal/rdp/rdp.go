@@ -20,6 +20,15 @@ func New(cfg *config.Config, vm *virtualization.Manager) *Configurator {
 }
 
 func (r *Configurator) InstallScript() string {
+	return r.ConfigScriptWithApt(true)
+}
+
+// ConfigScript returns the xRDP configuration bash fragment (no apt update).
+func (r *Configurator) ConfigScript() string {
+	return r.ConfigScriptWithApt(false)
+}
+
+func (r *Configurator) ConfigScriptWithApt(includeApt bool) string {
 	width := r.cfg.RDP.Width
 	height := r.cfg.RDP.Height
 	port := r.cfg.RDP.Port
@@ -33,15 +42,7 @@ func (r *Configurator) InstallScript() string {
 		port = 3389
 	}
 
-	return fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
-
-echo "==> Installing xRDP..."
-sudo apt-get update -qq
-sudo apt-get install -y -qq xrdp xorgxrdp x11-xserver-utils
-
-echo "==> Configuring xRDP for XFCE..."
+	body := fmt.Sprintf(`echo "==> Configuring xRDP for XFCE..."
 echo "xfce4-session" > /home/alfaos/.xsession
 chmod +x /home/alfaos/.xsession
 sudo chown alfaos:alfaos /home/alfaos/.xsession
@@ -136,8 +137,21 @@ echo "==> Enabling and starting xRDP..."
 sudo systemctl enable xrdp
 sudo systemctl restart xrdp
 
-echo "==> RDP configured (default resolution %dx%d — run: alfaos connect)."
+echo "==> RDP configured (default resolution %dx%d)."
 `, width, height, port, port, width, height)
+
+	if !includeApt {
+		return body
+	}
+	return fmt.Sprintf(`#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+echo "==> Installing xRDP..."
+sudo apt-get update -qq
+sudo apt-get install -y -qq xrdp xorgxrdp x11-xserver-utils
+
+%s`, body)
 }
 
 func (r *Configurator) Install(ip string) error {

@@ -82,7 +82,8 @@ vm:
   disk_gb: 32
 
 alfaos:
-  theme: Arc    # Arc, Dracula, or Gruvbox
+alfaos:
+  theme: Alfa      # Alfa (red accents), Arc, Dracula, or Gruvbox
   terminal: tilix
   browser: true
   plank: true
@@ -95,6 +96,7 @@ dns:
   servers:
     - 94.140.14.14   # AdGuard DNS — blocks ads/trackers (https://adguard-dns.io)
     - 94.140.15.15
+    - 9.9.9.11       # Quad9 backup
 ```
 
 ### Privacy DNS (AdGuard)

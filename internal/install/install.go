@@ -9,6 +9,7 @@ import (
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/debian"
 	"github.com/alfaos/alfaos/internal/desktop"
+	"github.com/alfaos/alfaos/internal/guestsetup"
 	"github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/networking"
@@ -58,7 +59,16 @@ func (i *Installer) Run(force bool) error {
 		logging.Warn("KVM module load: %v", err)
 	}
 
-	// Step 3: Install host packages
+	// Step 3–5: Host packages + networking (parallel with ISO download)
+	isoDone := make(chan error, 1)
+	go func() {
+		if err := i.deb.DownloadISO(); err != nil {
+			isoDone <- fmt.Errorf("ISO download: %w", err)
+			return
+		}
+		isoDone <- nil
+	}()
+
 	logging.Step(3, totalSteps, "Installing virtualization packages")
 	if err := host.InstallHostPackages(hostReq.Distro.PackageManager); err != nil {
 		return fmt.Errorf("host package install: %w", err)
@@ -79,6 +89,11 @@ func (i *Installer) Run(force bool) error {
 		logging.Warn("Libvirt DNS config: %v", err)
 	}
 
+	if err := <-isoDone; err != nil {
+		return err
+	}
+	logging.Step(6, totalSteps, "Debian ISO ready")
+
 	// Step 6: Ensure state directories
 	if err := i.cfg.EnsureDirs(); err != nil {
 		return err
@@ -93,13 +108,7 @@ func (i *Installer) Run(force bool) error {
 		logging.Warn("Could not copy workspace wallpapers: %v", err)
 	}
 
-	// Step 7: Download and verify ISO
-	logging.Step(6, totalSteps, "Downloading Debian ISO")
-	if err := i.deb.DownloadISO(); err != nil {
-		return fmt.Errorf("ISO download: %w", err)
-	}
-
-	// Step 8: Generate preseed and create VM
+	// Step 7: Generate preseed and create VM
 	logging.Step(7, totalSteps, "Creating ALFAOS virtual machine")
 	preseedPath, err := i.deb.GeneratePreseed()
 	if err != nil {
@@ -147,9 +156,6 @@ func (i *Installer) Run(force bool) error {
 		return fmt.Errorf("start VM: %w", err)
 	}
 
-	// Wait for VM to boot and obtain DHCP lease
-	time.Sleep(20 * time.Second)
-
 	vmIP, err := i.vm.GetVMIP(10 * time.Minute)
 	if err != nil {
 		return fmt.Errorf("get VM IP: %w", err)
@@ -158,11 +164,9 @@ func (i *Installer) Run(force bool) error {
 	if err := i.vm.WaitForSSH(vmIP, 15*time.Minute); err != nil {
 		logging.Warn("SSH failed, power-cycling VM and retrying...")
 		_ = i.vm.StopVM()
-		time.Sleep(5 * time.Second)
 		if err := i.vm.StartVM(); err != nil {
 			return fmt.Errorf("restart VM: %w", err)
 		}
-		time.Sleep(30 * time.Second)
 
 		vmIP, err = i.vm.GetVMIP(5 * time.Minute)
 		if err != nil {
@@ -173,25 +177,15 @@ func (i *Installer) Run(force bool) error {
 		}
 	}
 
-	// Step 10: Install desktop
+	// Step 10–11: Guest setup (desktop + fonts + RDP in one SSH session)
 	logging.Step(10, totalSteps, "Installing ALFAOS desktop environment")
-	if err := i.wall.Install(vmIP); err != nil {
-		return fmt.Errorf("wallpapers: %w", err)
-	}
-	if err := i.desk.Install(vmIP); err != nil {
-		return fmt.Errorf("desktop: %w", err)
-	}
-
-	// Step 11: Install RDP
-	logging.Step(11, totalSteps, "Installing and configuring RDP server")
-	if err := i.rdpCfg.Install(vmIP); err != nil {
-		return fmt.Errorf("rdp: %w", err)
+	if err := guestsetup.Install(i.cfg, i.vm, i.wall, i.desk, i.rdpCfg, vmIP); err != nil {
+		return fmt.Errorf("guest setup: %w", err)
 	}
 
 	// Reboot VM to apply desktop/RDP config
 	logging.Info("Rebooting VM to apply configuration...")
 	_, _ = i.vm.RunSSH(vmIP, "sudo reboot")
-	time.Sleep(30 * time.Second)
 
 	vmIP, err = i.vm.GetVMIP(5 * time.Minute)
 	if err != nil {
@@ -248,7 +242,7 @@ func (i *Installer) buildRepairFuncs(vmIP string) map[string]func() error {
 			return i.rdpCfg.Install(vmIP)
 		},
 		"XFCE installed": func() error {
-			return i.desk.Install(vmIP)
+			return guestsetup.Install(i.cfg, i.vm, i.wall, i.desk, i.rdpCfg, vmIP)
 		},
 		"Desktop session working": func() error {
 			return i.rdpCfg.Install(vmIP)

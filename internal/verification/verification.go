@@ -139,7 +139,7 @@ func (v *Verifier) checkRemote(name, cmd string) {
 func (v *Verifier) themeCheck() string {
 	theme := strings.ToLower(v.cfg.ALFAOS.Theme)
 	switch theme {
-	case "arc":
+	case "alfa", "arc":
 		return "dpkg -l arc-theme 2>/dev/null | grep -q ^ii && echo ok"
 	case "dracula":
 		return "dpkg -l dracula-theme 2>/dev/null | grep -q ^ii && echo ok"

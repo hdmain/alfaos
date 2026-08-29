@@ -87,7 +87,7 @@ func Default() *Config {
 	c.ALFAOS.Username = "alfaos"
 	c.ALFAOS.Password = "alfaos"
 	c.ALFAOS.Hostname = "alfaos"
-	c.ALFAOS.Theme = "Arc"
+	c.ALFAOS.Theme = "Alfa"
 	c.ALFAOS.Icons = "Papirus-Dark"
 	c.ALFAOS.Wallpaper = "alfa2.jpeg"
 	c.ALFAOS.Terminal = "tilix"
@@ -103,8 +103,8 @@ func Default() *Config {
 	c.Power.IdleShutdownMinutes = 15
 	c.Power.WakeOnRDP = true
 
-	// AdGuard DNS default — blocks ads, trackers, and phishing; no logging (https://adguard-dns.io)
-	c.DNS.Servers = []string{"94.140.14.14", "94.140.15.15"}
+	// AdGuard DNS + Quad9 backup (blocks malware/DNSSEC)
+	c.DNS.Servers = []string{"94.140.14.14", "94.140.15.15", "9.9.9.11"}
 
 	c.Paths.ISOCache = "/var/lib/alfaos/iso"
 	c.Paths.PreseedDir = "/var/lib/alfaos/preseed"
@@ -213,7 +213,7 @@ func (c *Config) DNSServers() []string {
 	if len(c.DNS.Servers) > 0 {
 		return append([]string(nil), c.DNS.Servers...)
 	}
-	return []string{"94.140.14.14", "94.140.15.15"}
+	return []string{"94.140.14.14", "94.140.15.15", "9.9.9.11"}
 }
 
 func (c *Config) EnsureDirs() error {

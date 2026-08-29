@@ -20,9 +20,10 @@ func New(cfg *config.Config, vm *virtualization.Manager) *Configurator {
 	return &Configurator{cfg: cfg, vm: vm}
 }
 
-func (d *Configurator) InstallScript() string {
+func (d *Configurator) InstallScript(rdpSection string) string {
 	theme := d.cfg.ALFAOS.Theme
 	gtkTheme, wmTheme := themeNames(theme)
+	alfaStyle := strings.EqualFold(theme, "alfa")
 	iconTheme := d.cfg.ALFAOS.Icons
 	if iconTheme == "" {
 		iconTheme = "Papirus-Dark"
@@ -44,6 +45,13 @@ sudo tee /etc/resolv.conf >/dev/null << 'RESOLV'
 %sRESOLV
 `, dhcpDNS, resolvConf)
 
+	alfaCSS := ""
+	if alfaStyle {
+		alfaCSS = alfaThemeCSSBlock()
+	}
+	fontSetup := `echo "==> Refreshing font cache..."
+sudo fc-cache -f >/dev/null 2>&1 || true`
+
 	tilixConfig := ""
 	if strings.ToLower(d.cfg.ALFAOS.Terminal) != "xfce4-terminal" && d.cfg.ALFAOS.Terminal != "xfce" {
 		tilixConfig = `
@@ -62,10 +70,9 @@ sudo apt-get install -y -qq firefox-esr || sudo apt-get install -y -qq firefox`
 
 	plankInstall := ""
 	plankConfig := ""
-	panelConfig := panelXML(false)
+	panelConfig := panelXML(d.cfg.ALFAOS.Plank, alfaStyle)
 	if d.cfg.ALFAOS.Plank {
 		plankInstall = "plank"
-		panelConfig = panelXML(true)
 		plankConfig = `
 echo "==> Configuring Plank dock..."
 mkdir -p /home/alfaos/.config/plank/dock1/launchers
@@ -128,10 +135,14 @@ sudo apt-get install -y -qq \
     papirus-icon-theme \
     %s \
     %s \
+    xrdp xorgxrdp x11-xserver-utils \
+    fonts-noto-core fonts-liberation fonts-noto-color-emoji \
     mousepad galculator btop gdebi \
     lightdm \
     dbus-x11 \
     net-tools
+
+%s
 
 %s
 
@@ -198,7 +209,7 @@ cat > /home/alfaos/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml << 'XS
     <property name="IconThemeName" type="string" value="%s"/>
   </property>
   <property name="Gtk" type="empty">
-    <property name="FontName" type="string" value="Sans 10"/>
+    <property name="FontName" type="string" value="Noto Sans 10"/>
     <property name="CursorThemeName" type="string" value="Adwaita"/>
     <property name="DecorationLayout" type="string" value="icon,menu:minimize,maximize,close"/>
   </property>
@@ -246,15 +257,17 @@ cat > /home/alfaos/.config/gtk-3.0/settings.ini << 'GTK3'
 [Settings]
 gtk-theme-name=%s
 gtk-icon-theme-name=%s
-gtk-font-name=Sans 10
+gtk-font-name=Noto Sans 10
 gtk-cursor-theme-name=Adwaita
 gtk-application-prefer-dark-theme=1
 GTK3
 
+%s
+
 cat > /home/alfaos/.config/gtk-2.0/gtkrc << 'GTK2'
 gtk-theme-name="%s"
 gtk-icon-theme-name="%s"
-gtk-font-name="Sans 10"
+gtk-font-name="Noto Sans 10"
 GTK2
 
 mkdir -p /home/alfaos/.icons/default
@@ -347,17 +360,51 @@ LIGHTDM
 
 sudo chown -R alfaos:alfaos /home/alfaos/.config /home/alfaos/.local
 
+%s
+
 echo "==> ALFAOS desktop configuration complete."
 `, strings.Join(themePackages, " "), terminalPkg, plankInstall, browserInstall,
-		dnsConfig, terminalPkg, terminalPkg, tilixConfig, plankConfig, panelConfig,
+		dnsConfig, fontSetup, terminalPkg, terminalPkg, tilixConfig, plankConfig, panelConfig,
 		gtkTheme, iconTheme, wmTheme, wallPath, wallPath,
-		gtkTheme, iconTheme, gtkTheme, iconTheme, iconTheme,
-		gtkTheme, wmTheme, iconTheme, wallPath)
+		gtkTheme, iconTheme, alfaCSS, gtkTheme, iconTheme, iconTheme,
+		gtkTheme, wmTheme, iconTheme, wallPath, rdpSection)
+}
+
+func alfaThemeCSSBlock() string {
+	return `echo "==> Applying ALFA red accent theme..."
+cat > /home/alfaos/.config/gtk-3.0/gtk.css << 'GTKCSS'
+/* ALFAOS — Arc-Dark base with red accents (no extra theme packages) */
+@define-color theme_selected_bg_color #c62828;
+@define-color theme_selected_fg_color #ffffff;
+@define-color accent_color #c62828;
+@define-color accent_bg_color #c62828;
+
+*:selected, .view:selected, .view:selected:focus {
+  background-color: #c62828;
+  color: #ffffff;
+}
+
+button:checked, button:active, .linked > button:checked {
+  background-color: #b71c1c;
+  border-color: #c62828;
+}
+
+progressbar progress {
+  background-color: #c62828;
+}
+
+headerbar.selection-mode,
+.xfce4-panel.background {
+  background-color: #8b0000;
+  background-image: none;
+}
+GTKCSS
+`
 }
 
 func themeNames(theme string) (gtk, wm string) {
 	switch strings.ToLower(theme) {
-	case "arc":
+	case "alfa", "arc":
 		return "Arc-Dark", "Arc-Dark"
 	case "dracula":
 		return "Dracula", "Dracula"
@@ -379,7 +426,7 @@ func terminalPackage(name string) string {
 
 func themePackages(theme string) []string {
 	switch strings.ToLower(theme) {
-	case "arc":
+	case "alfa", "arc":
 		return []string{"arc-theme"}
 	case "dracula":
 		return []string{"dracula-theme"}
@@ -390,19 +437,32 @@ func themePackages(theme string) []string {
 	}
 }
 
-func panelXML(plankEnabled bool) string {
+func panelXML(plankEnabled, alfaStyle bool) string {
+	panelStyle := ""
+	if alfaStyle {
+		panelStyle = `
+      <property name="background-style" type="uint" value="1"/>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.776"/>
+        <value type="double" value="0.157"/>
+        <value type="double" value="0.157"/>
+        <value type="double" value="0.95"/>
+      </property>`
+	} else {
+		panelStyle = `
+      <property name="background-style" type="uint" value="0"/>
+      <property name="background-alpha" type="uint" value="100"/>`
+	}
+
 	if plankEnabled {
-		// Plank shows pinned/running apps — skip tasklist to avoid duplicate icons.
-		return `<?xml version="1.0" encoding="UTF-8"?>
+		return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
   <property name="panels" type="array">
     <value type="int" value="1"/>
     <property name="panel-1" type="empty">
       <property name="position" type="string" value="p=10;x=0;y=0"/>
       <property name="length" type="uint" value="100"/>
-      <property name="size" type="uint" value="32"/>
-      <property name="background-style" type="uint" value="0"/>
-      <property name="background-alpha" type="uint" value="100"/>
+      <property name="size" type="uint" value="32"/>%s
       <property name="plugin-ids" type="array">
         <value type="int" value="1"/>
         <value type="int" value="2"/>
@@ -415,19 +475,17 @@ func panelXML(plankEnabled bool) string {
     <property name="plugin-2" type="string" value="separator"/>
     <property name="plugin-3" type="string" value="systray"/>
   </property>
-</channel>`
+</channel>`, panelStyle)
 	}
 
-	return `<?xml version="1.0" encoding="UTF-8"?>
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
   <property name="panels" type="array">
     <value type="int" value="1"/>
     <property name="panel-1" type="empty">
       <property name="position" type="string" value="p=10;x=0;y=0"/>
       <property name="length" type="uint" value="100"/>
-      <property name="size" type="uint" value="32"/>
-      <property name="background-style" type="uint" value="0"/>
-      <property name="background-alpha" type="uint" value="100"/>
+      <property name="size" type="uint" value="32"/>%s
       <property name="plugin-ids" type="array">
         <value type="int" value="1"/>
         <value type="int" value="2"/>
@@ -444,16 +502,20 @@ func panelXML(plankEnabled bool) string {
     </property>
     <property name="plugin-4" type="string" value="systray"/>
   </property>
-</channel>`
+</channel>`, panelStyle)
 }
 
 func (d *Configurator) Install(ip string) error {
+	return d.install(ip, "")
+}
+
+func (d *Configurator) install(ip, rdpSection string) error {
 	logging.Info("Installing ALFAOS desktop environment on VM...")
 
 	scriptPath := "/tmp/alfaos-desktop-setup.sh"
 	localScript := d.cfg.Paths.StateDir + "/desktop-setup.sh"
 
-	if err := os.WriteFile(localScript, []byte(d.InstallScript()), 0755); err != nil {
+	if err := os.WriteFile(localScript, []byte(d.InstallScript(rdpSection)), 0755); err != nil {
 		return fmt.Errorf("write desktop script: %w", err)
 	}
 
