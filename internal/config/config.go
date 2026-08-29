@@ -122,6 +122,34 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// ResolvePath returns the config file path from an explicit flag or common locations.
+func ResolvePath(flag string) string {
+	if flag != "" {
+		return flag
+	}
+	for _, c := range []string{"/etc/alfaos/config.yaml", "configs/default.yaml"} {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return "/etc/alfaos/config.yaml"
+}
+
+// Save writes the config to path with restrictive permissions (contains password).
+func Save(cfg *Config, path string) error {
+	if path == "" {
+		path = ResolvePath("")
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0640)
+}
+
 func (c *Config) ISOPath() string {
 	name := c.Debian.ISOFilename
 	if name == "" {

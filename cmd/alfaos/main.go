@@ -12,15 +12,17 @@ import (
 	"github.com/alfaos/alfaos/internal/install"
 	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/networking"
+	"github.com/alfaos/alfaos/internal/passwd"
 	"github.com/alfaos/alfaos/internal/power"
 	"github.com/alfaos/alfaos/internal/virtualization"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cfgFile string
-	force   bool
-	version = "dev"
+	cfgFile     string
+	force       bool
+	newPassword string
+	version     = "dev"
 )
 
 func main() {
@@ -80,6 +82,18 @@ func main() {
 		return vm.RebootVM()
 	})
 
+	passwdCmd := &cobra.Command{
+		Use:   "passwd",
+		Short: "Change ALFAOS VM user password (config and guest)",
+		Long: `Change the password for the ALFAOS desktop user.
+
+Updates /etc/alfaos/config.yaml and, when the VM is installed, changes the
+password inside the guest via SSH (starts the VM if it is stopped).`,
+		RunE: runPasswd,
+	}
+	passwdCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file (default: /etc/alfaos/config.yaml)")
+	passwdCmd.Flags().StringVar(&newPassword, "password", "", "New password (non-interactive; avoid on shared shells)")
+
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
@@ -88,11 +102,29 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, versionCmd)
+	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func runPasswd(cmd *cobra.Command, args []string) error {
+	if err := virtualization.EnsureLibvirtAccess(); err != nil {
+		return err
+	}
+
+	cfgPath := config.ResolvePath(cfgFile)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	pass, err := passwd.PromptNewPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	return passwd.Change(cfg, cfgPath, pass)
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {

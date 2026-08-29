@@ -113,6 +113,18 @@ Apply config changes with:
 sudo alfaos expose-rdp
 ```
 
+### Change password
+
+```bash
+sudo alfaos passwd
+```
+
+Prompts for a new password, updates `/etc/alfaos/config.yaml`, and changes the user password inside the VM (starts the VM if it is stopped). Non-interactive:
+
+```bash
+sudo alfaos passwd --password 'your-new-password'
+```
+
 ## Requirements
 
 - Linux host (Debian/Ubuntu/Fedora/Arch)
@@ -153,6 +165,7 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 | `alfaos start` | Start the VM |
 | `alfaos shutdown` | Graceful shutdown |
 | `alfaos reboot` | Reboot (or start if stopped) |
+| `alfaos passwd` | Change VM user password (config + guest) |
 | `alfaos version` | Print version |
 
 ## Desktop slimming
