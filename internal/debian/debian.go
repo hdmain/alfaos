@@ -267,7 +267,7 @@ d-i clock-setup/ntp boolean true
 
 d-i partman-auto/method string regular
 d-i partman-auto/choose_recipe select atomic
-d-i partman-auto/disk string /dev/sda
+d-i partman-auto/disk string /dev/vda
 d-i partman/confirm_write_new_label boolean true
 d-i partman/choose_partition select finish
 d-i partman/confirm boolean true
@@ -288,7 +288,7 @@ d-i pkgsel/update-policy select none
 
 d-i grub-installer/only_debian boolean true
 d-i grub-installer/with_other_os boolean true
-d-i grub-installer/bootdev string /dev/sda
+d-i grub-installer/bootdev string /dev/vda
 
 d-i finish-install/reboot_in_progress note
 d-i preseed/late_command string \

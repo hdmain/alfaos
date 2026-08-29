@@ -200,7 +200,7 @@ cat > /home/alfaos/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml << 'XFWM4'
     <property name="theme" type="string" value="%s"/>
     <property name="title_font" type="string" value="Sans Bold 9"/>
     <property name="button_layout" type="string" value="O|SHMC"/>
-    <property name="use_compositing" type="bool" value="true"/>
+    <property name="use_compositing" type="bool" value="false"/>
     <property name="box_move" type="bool" value="false"/>
     <property name="box_resize" type="bool" value="false"/>
   </property>
@@ -285,6 +285,8 @@ xfconf-query -c xsettings -p /Net/IconThemeName -s "$ICON_THEME" 2>/dev/null || 
   xfconf-query -c xsettings -p /Net/IconThemeName -n -t string -s "$ICON_THEME"
 xfconf-query -c xfwm4 -p /general/theme -s "$WM_THEME" 2>/dev/null || \
   xfconf-query -c xfwm4 -p /general/theme -n -t string -s "$WM_THEME"
+xfconf-query -c xfwm4 -p /general/use_compositing -s false 2>/dev/null || \
+  xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false
 xfconf-query -c xfce4-desktop -p /desktop-icons/style -s 2 2>/dev/null || \
   xfconf-query -c xfce4-desktop -p /desktop-icons/style -n -t int -s 2 2>/dev/null || true
 

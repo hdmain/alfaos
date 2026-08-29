@@ -80,6 +80,9 @@ func (i *Installer) Run(force bool) error {
 	if err := i.cfg.EnsureDirs(); err != nil {
 		return err
 	}
+	if err := i.cfg.WriteSystemConfig(); err != nil {
+		logging.Warn("Could not write /etc/alfaos/config.yaml: %v", err)
+	}
 
 	// Extract wallpapers to state dir early
 	_ = i.wall.ExtractToStateDir()
@@ -195,11 +198,7 @@ func (i *Installer) Run(force bool) error {
 	}
 
 	if i.cfg.RDP.Expose {
-		bind := i.cfg.RDP.BindHost
-		if bind == "" {
-			bind = "0.0.0.0"
-		}
-		if err := networking.ExposeRDP(i.cfg.Paths.StateDir, bind, i.cfg.RDP.Port, vmIP, i.cfg.RDP.Port); err != nil {
+		if err := networking.ExposeRDP(i.cfg, vmIP); err != nil {
 			logging.Warn("RDP port forward: %v", err)
 		}
 	}
@@ -253,7 +252,7 @@ func (i *Installer) buildRepairFuncs(vmIP string) map[string]func() error {
 		},
 		"RDP port reachable": func() error {
 			if i.cfg.RDP.Expose {
-				return networking.ExposeRDP(i.cfg.Paths.StateDir, i.cfg.RDP.BindHost, i.cfg.RDP.Port, vmIP, i.cfg.RDP.Port)
+				return networking.ExposeRDP(i.cfg, vmIP)
 			}
 			return nil
 		},
@@ -290,6 +289,16 @@ func (i *Installer) printFinalReport(vmIP string, passed bool, failed []string) 
 	fmt.Printf("  Username:    %s\n", i.cfg.ALFAOS.Username)
 	fmt.Printf("  Password:    %s\n", i.cfg.ALFAOS.Password)
 	fmt.Println()
+	if i.cfg.RDP.Expose && i.cfg.Power.WakeOnRDP {
+		fmt.Println("  Power saving:")
+		fmt.Println("    • Host keeps TCP 3389 open even when the VM is off")
+		fmt.Println("    • Connecting with any RDP client starts the VM automatically")
+		if i.cfg.Power.IdleShutdownMinutes > 0 {
+			fmt.Printf("    • VM shuts down after %d minutes without RDP sessions\n", i.cfg.Power.IdleShutdownMinutes)
+		}
+		fmt.Println("    • First connect after idle may take 30–90s (VM boot)")
+		fmt.Println()
+	}
 	fmt.Println("  Connect with any RDP client:")
 	fmt.Printf("    alfaos connect                    # %s, recommended\n", i.cfg.RDPResolution())
 	fmt.Printf("    xfreerdp /v:%s /u:%s /p:%s /size:%s\n", rdpHost, i.cfg.ALFAOS.Username, i.cfg.ALFAOS.Password, i.cfg.RDPResolution())

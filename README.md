@@ -86,6 +86,31 @@ alfaos:
   terminal: tilix
   browser: true
   plank: true
+
+power:
+  idle_shutdown_minutes: 15   # shut down VM when no RDP sessions (0 = never)
+  wake_on_rdp: true           # start VM when any RDP client connects to the host
+```
+
+### Power saving (wake-on-RDP)
+
+When `rdp.expose` is enabled, the host service `alfaos-rdp-forward` always listens on the RDP port (default 3389), even if the VM is powered off.
+
+1. You connect from another PC with any RDP client to the VPS IP.
+2. The proxy starts the VM, waits for xRDP, then forwards the session.
+3. After `idle_shutdown_minutes` with no RDP sessions, the VM is shut down and host RAM is freed.
+
+First connect after idle can take **30–90 seconds** (VM boot). If your client times out, wait a minute and connect again — the VM may already be up.
+
+```bash
+sudo systemctl status alfaos-rdp-forward
+sudo journalctl -u alfaos-rdp-forward -f
+```
+
+Apply config changes with:
+
+```bash
+sudo alfaos expose-rdp
 ```
 
 ## Requirements
@@ -124,6 +149,7 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 |---------|-------------|
 | `alfaos install` | Full automated install (requires root) |
 | `alfaos connect` | Open RDP session to the VM |
+| `alfaos expose-rdp` | Install/restart host RDP proxy (wake-on-connect) |
 | `alfaos start` | Start the VM |
 | `alfaos shutdown` | Graceful shutdown |
 | `alfaos reboot` | Reboot (or start if stopped) |

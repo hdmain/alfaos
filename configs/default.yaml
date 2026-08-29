@@ -31,6 +31,12 @@ rdp:
   expose: true       # forward 0.0.0.0:3389 on host → VM (for VPS remote RDP)
   bind_host: "0.0.0.0"
 
+# Host listens on RDP even when the VM is off. An incoming connection starts the VM;
+# after idle_shutdown_minutes with no RDP sessions the VM is shut down (RAM freed).
+power:
+  idle_shutdown_minutes: 15   # 0 = never auto-shutdown
+  wake_on_rdp: true
+
 paths:
   iso_cache: /var/lib/alfaos/iso
   preseed_dir: /var/lib/alfaos/preseed

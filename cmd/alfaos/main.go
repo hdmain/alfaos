@@ -12,6 +12,7 @@ import (
 	"github.com/alfaos/alfaos/internal/install"
 	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/networking"
+	"github.com/alfaos/alfaos/internal/power"
 	"github.com/alfaos/alfaos/internal/virtualization"
 	"github.com/spf13/cobra"
 )
@@ -56,10 +57,18 @@ func main() {
 
 	exposeCmd := &cobra.Command{
 		Use:   "expose-rdp",
-		Short: "Forward host RDP port (0.0.0.0:3389) to the ALFAOS VM",
+		Short: "Forward host RDP port (0.0.0.0:3389) to the ALFAOS VM (wake-on-connect)",
 		RunE:  runExposeRDP,
 	}
 	exposeCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file (default: configs/default.yaml)")
+
+	rdpProxyCmd := &cobra.Command{
+		Use:    "rdp-proxy",
+		Short:  "Run host RDP proxy daemon (wake-on-connect + idle shutdown)",
+		Hidden: true,
+		RunE:   runRDPProxy,
+	}
+	rdpProxyCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
 
 	startCmd := vmCommand("start", "Start the ALFAOS VM", func(vm *virtualization.Manager) error {
 		return vm.StartVM()
@@ -79,7 +88,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, startCmd, shutdownCmd, rebootCmd, versionCmd)
+	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -94,6 +103,17 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	return connect.Run(cfg)
 }
 
+func runRDPProxy(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("alfaos rdp-proxy must be run as root")
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	return power.Run(cfg)
+}
+
 func runExposeRDP(cmd *cobra.Command, args []string) error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("alfaos expose-rdp must be run as root: sudo alfaos expose-rdp")
@@ -103,27 +123,28 @@ func runExposeRDP(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	vm := virtualization.New(cfg)
-	vmIP, err := readVMIP(cfg, vm)
-	if err != nil {
+	vmIP, _ := readVMIP(cfg, vm) // optional — proxy can wake a stopped VM
+	if err := networking.ExposeRDP(cfg, vmIP); err != nil {
 		return err
 	}
 	bind := cfg.RDP.BindHost
 	if bind == "" {
 		bind = "0.0.0.0"
 	}
-	if err := networking.ExposeRDP(cfg.Paths.StateDir, bind, cfg.RDP.Port, vmIP, cfg.RDP.Port); err != nil {
-		return err
-	}
-	host := networking.RDPConnectAddress(cfg.RDP.Port, true, vmIP)
-	fmt.Printf("RDP proxy: %s:%d → VM %s:%d\n", bind, cfg.RDP.Port, vmIP, cfg.RDP.Port)
+	fmt.Printf("RDP proxy: %s:%d → VM (wake_on_rdp=%v, idle=%dm)\n",
+		bind, cfg.RDP.Port, cfg.Power.WakeOnRDP, cfg.Power.IdleShutdownMinutes)
 	if networking.TestPort("127.0.0.1", fmt.Sprintf("%d", cfg.RDP.Port)) {
 		fmt.Printf("Local check OK: port %d is listening on host\n", cfg.RDP.Port)
 	} else {
 		fmt.Printf("WARNING: port %d not listening — run: systemctl status alfaos-rdp-forward\n", cfg.RDP.Port)
 	}
-	if host != "" && host != vmIP {
+	host := networking.RDPConnectAddress(cfg.RDP.Port, true, vmIP)
+	if host != "" {
 		fmt.Printf("Connect from outside: rdesktop %s -u %s -p %s -g %s\n", host, cfg.ALFAOS.Username, cfg.ALFAOS.Password, cfg.RDPResolution())
 		fmt.Printf("If that fails, open TCP %d in your VPS provider firewall\n", cfg.RDP.Port)
+	}
+	if cfg.Power.WakeOnRDP {
+		fmt.Println("Tip: VM may be shut down while idle — your RDP client will wake it (first connect can take 30–90s)")
 	}
 	return nil
 }
@@ -134,6 +155,9 @@ func readVMIP(cfg *config.Config, vm *virtualization.Manager) (string, error) {
 		if ip := strings.TrimSpace(string(data)); ip != "" {
 			return ip, nil
 		}
+	}
+	if !vm.DomainRunning() {
+		return "", fmt.Errorf("VM is not running")
 	}
 	vmIP, err := vm.GetVMIP(2 * time.Minute)
 	if err != nil {

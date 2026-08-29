@@ -50,6 +50,12 @@ type Config struct {
 		BindHost string `yaml:"bind_host"` // host listen address, default 0.0.0.0
 	} `yaml:"rdp"`
 
+	// Power controls idle shutdown and wake-on-incoming-RDP (host listens even when VM is off).
+	Power struct {
+		IdleShutdownMinutes int  `yaml:"idle_shutdown_minutes"` // 0 = disabled; shutdown VM after this many idle minutes
+		WakeOnRDP           bool `yaml:"wake_on_rdp"`           // start VM when a client connects to the host RDP port
+	} `yaml:"power"`
+
 	Paths struct {
 		ISOCache   string `yaml:"iso_cache"`
 		PreseedDir string `yaml:"preseed_dir"`
@@ -88,6 +94,9 @@ func Default() *Config {
 	c.RDP.Height = 1080
 	c.RDP.Expose = true
 	c.RDP.BindHost = "0.0.0.0"
+
+	c.Power.IdleShutdownMinutes = 15
+	c.Power.WakeOnRDP = true
 
 	c.Paths.ISOCache = "/var/lib/alfaos/iso"
 	c.Paths.PreseedDir = "/var/lib/alfaos/preseed"
@@ -171,6 +180,24 @@ func (c *Config) EnsureDirs() error {
 		}
 	}
 	return nil
+}
+
+// WriteSystemConfig writes the active config to /etc/alfaos/config.yaml when missing or outdated keys needed.
+func (c *Config) WriteSystemConfig() error {
+	dir := "/etc/alfaos"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "config.yaml")
+	if _, err := os.Stat(path); err == nil {
+		// Keep admin customizations; only create if absent.
+		return nil
+	}
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // AdaptToHost lowers VM resource requests when the host is tight on RAM or disk.

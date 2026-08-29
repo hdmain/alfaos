@@ -7,42 +7,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alfaos/alfaos/internal/config"
 	hostpkg "github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
 )
 
-// ExposeRDP listens on bindAddr:hostPort and proxies TCP to the VM RDP port.
-func ExposeRDP(stateDir, bindAddr string, hostPort int, vmIP string, vmPort int) error {
+// ExposeRDP installs a host systemd service that listens on the RDP port,
+// wakes the VM on connect (when configured), and proxies to guest xRDP.
+func ExposeRDP(cfg *config.Config, vmIP string) error {
+	hostPort := cfg.RDP.Port
 	if hostPort <= 0 {
 		hostPort = 3389
 	}
-	if vmPort <= 0 {
-		vmPort = 3389
-	}
+	vmPort := hostPort
+	bindAddr := cfg.RDP.BindHost
 	if bindAddr == "" {
 		bindAddr = "0.0.0.0"
 	}
 
-	logging.Info("Exposing RDP on %s:%d → VM %s:%d (socat proxy)", bindAddr, hostPort, vmIP, vmPort)
-
-	if err := ensureSocat(); err != nil {
-		return err
-	}
+	logging.Info("Exposing RDP on %s:%d → VM (wake_on_rdp=%v, idle=%dm)",
+		bindAddr, hostPort, cfg.Power.WakeOnRDP, cfg.Power.IdleShutdownMinutes)
 
 	removeLegacyIPTables(hostPort, vmIP, vmPort)
 	allowHostPort(hostPort)
 
-	if !TestPort(vmIP, fmt.Sprintf("%d", vmPort)) {
-		logging.Warn("VM RDP at %s:%d is not reachable from host yet", vmIP, vmPort)
-	} else {
-		logging.Info("VM RDP reachable at %s:%d", vmIP, vmPort)
+	if vmIP != "" {
+		if TestPort(vmIP, fmt.Sprintf("%d", vmPort)) {
+			logging.Info("VM RDP reachable at %s:%d", vmIP, vmPort)
+		} else {
+			logging.Warn("VM RDP at %s:%d is not reachable from host yet (OK if VM is stopped)", vmIP, vmPort)
+		}
 	}
 
-	if err := writeSocatScripts(stateDir, bindAddr, hostPort, vmPort); err != nil {
-		return fmt.Errorf("write socat scripts: %w", err)
-	}
-	if err := installSocatService(stateDir, bindAddr, hostPort); err != nil {
-		return fmt.Errorf("install socat service: %w", err)
+	if err := installProxyService(cfg, bindAddr, hostPort); err != nil {
+		return fmt.Errorf("install RDP proxy service: %w", err)
 	}
 
 	time.Sleep(500 * time.Millisecond)
@@ -52,21 +50,7 @@ func ExposeRDP(stateDir, bindAddr string, hostPort int, vmIP string, vmPort int)
 		logging.Warn("RDP proxy may not be listening — check: systemctl status alfaos-rdp-forward")
 	}
 
-	printExposureHints(hostPort)
-	return nil
-}
-
-func ensureSocat() error {
-	if hostpkg.CommandExists("socat") {
-		return nil
-	}
-	logging.Info("Installing socat for RDP proxy...")
-	if _, err := hostpkg.RunCommand("apt-get", "install", "-y", "-qq", "--no-install-recommends", "socat"); err != nil {
-		_, err = hostpkg.RunCommand("apt-get", "-o", "Dir::Etc::sourceparts=/dev/null", "install", "-y", "-qq", "--no-install-recommends", "socat")
-		if err != nil {
-			return fmt.Errorf("install socat: %w", err)
-		}
-	}
+	printExposureHints(hostPort, cfg)
 	return nil
 }
 
@@ -83,6 +67,9 @@ func allowHostPort(port int) {
 }
 
 func removeLegacyIPTables(hostPort int, vmIP string, vmPort int) {
+	if vmIP == "" {
+		return
+	}
 	portStr := fmt.Sprintf("%d", hostPort)
 	vmPortStr := fmt.Sprintf("%d", vmPort)
 	vmDest := fmt.Sprintf("%s:%s", vmIP, vmPortStr)
@@ -113,60 +100,35 @@ func iptablesDelete(table, chain string, args ...string) {
 	_, _ = hostpkg.RunCommand("iptables", delArgs...)
 }
 
-func writeSocatScripts(stateDir, bindAddr string, hostPort, vmPort int) error {
-	runPath := filepath.Join(stateDir, "run-rdp-proxy.sh")
-	ipFile := filepath.Join(stateDir, "vm.ip")
-	vmNameFile := filepath.Join(stateDir, "vm.name")
-
-	vmName := "alfaos"
-	if data, err := os.ReadFile(vmNameFile); err == nil {
-		if n := strings.TrimSpace(string(data)); n != "" {
-			vmName = n
-		}
-	}
-
-	bindOpt := ""
-	if bindAddr != "" && bindAddr != "0.0.0.0" {
-		bindOpt = fmt.Sprintf(",bind=%s", bindAddr)
-	}
-
-	script := fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
-VM_IP=""
-if [ -f %q ]; then
-  VM_IP=$(tr -d '[:space:]' < %q)
-fi
-if [ -z "$VM_IP" ]; then
-  VM_IP=$(virsh domifaddr %q 2>/dev/null | awk '/ipv4/ {gsub(/\/.*/,"",$4); print $4; exit}')
-fi
-if [ -z "$VM_IP" ]; then
-  echo "ALFAOS: could not resolve VM IP for RDP proxy" >&2
-  exit 1
-fi
-exec /usr/bin/socat TCP-LISTEN:%d,reuseaddr,fork%s TCP:${VM_IP}:%d
-`, ipFile, ipFile, vmName, hostPort, bindOpt, vmPort)
-
-	return os.WriteFile(runPath, []byte(script), 0755)
-}
-
-func installSocatService(stateDir, bindAddr string, hostPort int) error {
+func installProxyService(cfg *config.Config, bindAddr string, hostPort int) error {
+	bin := resolveAlfaosBinary()
+	cfgPath := resolveConfigPath()
 	unitPath := "/etc/systemd/system/alfaos-rdp-forward.service"
-	runPath := filepath.Join(stateDir, "run-rdp-proxy.sh")
+
+	// Drop legacy socat helper if present.
+	_ = os.Remove(filepath.Join(cfg.Paths.StateDir, "run-rdp-proxy.sh"))
+
+	execStart := fmt.Sprintf("%s rdp-proxy", bin)
+	if cfgPath != "" {
+		execStart = fmt.Sprintf("%s rdp-proxy --config %s", bin, cfgPath)
+	}
 
 	unit := fmt.Sprintf(`[Unit]
-Description=ALFAOS RDP TCP proxy to VM (socat)
+Description=ALFAOS RDP proxy (wake-on-connect + idle shutdown)
 After=network-online.target libvirtd.service
 Wants=network-online.target
+Requires=libvirtd.service
 
 [Service]
 Type=simple
-Restart=on-failure
+Restart=always
 RestartSec=3
 ExecStart=%s
+# Keep listening on host port %d (bind %s) even when the VM is stopped.
 
 [Install]
 WantedBy=multi-user.target
-`, runPath)
+`, execStart, hostPort, bindAddr)
 
 	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
 		return err
@@ -177,12 +139,53 @@ WantedBy=multi-user.target
 	return nil
 }
 
-func printExposureHints(hostPort int) {
+func resolveAlfaosBinary() string {
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		if abs, err := filepath.Abs(exe); err == nil {
+			return abs
+		}
+		return exe
+	}
+	for _, p := range []string{"/usr/local/bin/alfaos", "/alfaos", "/usr/bin/alfaos"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "alfaos"
+}
+
+func resolveConfigPath() string {
+	for _, c := range []string{"/etc/alfaos/config.yaml", "configs/default.yaml"} {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+func printExposureHints(hostPort int, cfg *config.Config) {
 	if ip := GetHostPrimaryIPv4(); ip != "" {
-		logging.Info("Connect from outside: rdesktop %s -u alfaos -p alfaos -g 1920x1080", ip)
+		user := "alfaos"
+		pass := "alfaos"
+		res := "1920x1080"
+		if cfg != nil {
+			user = cfg.ALFAOS.Username
+			pass = cfg.ALFAOS.Password
+			res = cfg.RDPResolution()
+		}
+		logging.Info("Connect from outside: rdesktop %s -u %s -p %s -g %s", ip, user, pass, res)
 	}
 	logging.Info("Verify on VPS: ss -tlnp | grep %d", hostPort)
 	logging.Info("If external connect still fails, open TCP %d in your VPS provider firewall/panel", hostPort)
+	if cfg != nil && cfg.Power.WakeOnRDP {
+		logging.Info("Wake-on-RDP: host keeps port %d open; connecting starts the VM if it was shut down", hostPort)
+	}
+	if cfg != nil && cfg.Power.IdleShutdownMinutes > 0 {
+		logging.Info("Idle shutdown: VM stops after %d minutes without RDP sessions", cfg.Power.IdleShutdownMinutes)
+	}
 }
 
 // GetHostPrimaryIPv4 returns the primary outbound IPv4 address of this host.

@@ -145,20 +145,20 @@ func (m *Manager) CreateVM(isoPath, preseedPath string) error {
 		m.cfg.ALFAOS.Hostname,
 	)
 
-	// pc-i440fx + SATA uses default SeaBIOS (no firmware=bios — not on all hosts).
+	// VirtIO disk (/dev/vda) + VirtIO NIC — much faster than IDE in the guest.
 	args := []string{
 		"--name", m.cfg.VM.Name,
 		"--machine", "pc-i440fx-8.2",
 		"--ram", fmt.Sprintf("%d", m.cfg.VM.RAM),
 		"--vcpus", fmt.Sprintf("%d", m.cfg.VM.CPU),
-		"--disk", fmt.Sprintf("path=%s,size=%d,format=qcow2,bus=ide", diskPath, m.cfg.VM.Disk),
+		"--disk", fmt.Sprintf("path=%s,size=%d,format=qcow2,bus=virtio", diskPath, m.cfg.VM.Disk),
 		"--network", fmt.Sprintf("network=%s,model=virtio", m.cfg.VM.Network),
 		"--graphics", m.cfg.VM.Graphics,
 		"--console", "pty,target_type=serial",
 		"--location", location,
 		"--initrd-inject", preseedPath,
 		"--extra-args", kernelArgs,
-		"--osinfo", "detect=on,name=debian12",
+		"--osinfo", "detect=on,name="+m.cfg.OSVariant(),
 		"--boot", "hd",
 		"--noautoconsole",
 		"--check", "path_in_use=off",
