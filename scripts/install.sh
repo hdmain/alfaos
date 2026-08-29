@@ -21,7 +21,7 @@ Options:
 
 Environment:
   ALFAOS_GITHUB   GitHub repo (default: hdmain/alfaos)
-  ALFAOS_BRANCH   Branch with dist/ binaries (default: main)
+  ALFAOS_BRANCH   Git branch for config/assets (default: main)
 EOF
 }
 
@@ -47,19 +47,21 @@ need() {
 }
 
 install_deps() {
-  if need curl; then
-    return
-  fi
-  echo "==> Installing curl..."
+  local missing=()
+  need curl || missing+=(curl)
+  need unzip || missing+=(unzip)
+  [ "${#missing[@]}" -eq 0 ] && return 0
+
+  echo "==> Installing: ${missing[*]}..."
   if need apt-get; then
     apt-get update -qq
-    apt-get install -y -qq curl ca-certificates
+    apt-get install -y -qq ca-certificates "${missing[@]}"
   elif need dnf; then
-    dnf install -y curl ca-certificates
+    dnf install -y ca-certificates "${missing[@]}"
   elif need pacman; then
-    pacman -Sy --noconfirm curl ca-certificates
+    pacman -Sy --noconfirm ca-certificates "${missing[@]}"
   else
-    echo "error: install curl, then re-run" >&2
+    echo "error: install ${missing[*]}, then re-run" >&2
     exit 1
   fi
 }
@@ -75,22 +77,57 @@ detect_arch() {
   esac
 }
 
-install_binary() {
-  local arch bin url tmp
+github_user() {
+  echo "${GITHUB_REPO%%/*}"
+}
+
+github_repo_name() {
+  echo "${GITHUB_REPO#*/}"
+}
+
+install_binary_from_pages() {
+  local arch bin url tmp owner repo
   arch="$(detect_arch)"
   bin="alfaos-linux-${arch}"
-  url="https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/dist/${bin}"
+  owner="$(github_user)"
+  repo="$(github_repo_name)"
+  url="https://${owner}.github.io/${repo}/${bin}"
   tmp="$(mktemp)"
 
-  echo "==> Downloading ${bin}..."
-  if ! curl -fsSL "$url" -o "$tmp"; then
-    echo "error: failed to download ${url}" >&2
-    exit 1
-  fi
-
+  echo "==> Downloading ${bin} from GitHub Pages..."
+  curl -fsSL "$url" -o "$tmp"
   install -m 755 "$tmp" /usr/local/bin/alfaos
   rm -f "$tmp"
   ln -sf /usr/local/bin/alfaos /alfaos
+}
+
+install_binary_from_actions() {
+  local arch bin artifact url tmpdir
+  arch="$(detect_arch)"
+  bin="alfaos-linux-${arch}"
+  artifact="${bin}"
+  url="https://nightly.link/${GITHUB_REPO}/workflows/build.yml/refs/heads/${BRANCH}/${artifact}.zip"
+  tmpdir="$(mktemp -d)"
+
+  echo "==> Downloading ${bin} from GitHub Actions..."
+  curl -fsSL "$url" -o "${tmpdir}/artifact.zip"
+  unzip -q "${tmpdir}/artifact.zip" -d "${tmpdir}"
+
+  if [ -f "${tmpdir}/${bin}" ]; then
+    install -m 755 "${tmpdir}/${bin}" /usr/local/bin/alfaos
+  else
+    echo "error: ${bin} not found in workflow artifact" >&2
+    exit 1
+  fi
+  rm -rf "$tmpdir"
+  ln -sf /usr/local/bin/alfaos /alfaos
+}
+
+install_binary() {
+  if install_binary_from_pages 2>/dev/null; then
+    return 0
+  fi
+  install_binary_from_actions
 }
 
 install_config() {

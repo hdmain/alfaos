@@ -4,7 +4,7 @@ Automated Linux Framework for Alpha OS — a Go-based CLI that installs and conf
 
 ## One-line install
 
-Downloads a pre-built binary from `dist/` in the repo (built automatically by GitHub Actions on every push to `main`):
+Downloads a pre-built binary from **GitHub Actions** (published to GitHub Pages on every push to `main`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hdmain/alfaos/main/scripts/install.sh | sudo bash
@@ -15,6 +15,10 @@ Full automated install (CLI + KVM VM + XFCE desktop + RDP):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hdmain/alfaos/main/scripts/install.sh | sudo bash -s -- --full
 ```
+
+Binaries: `https://hdmain.github.io/alfaos/alfaos-linux-amd64` (auto-built by CI — no local `dist/` commit needed).
+
+**One-time repo setup:** GitHub → Settings → Pages → Source: **GitHub Actions**.
 
 Then connect:
 

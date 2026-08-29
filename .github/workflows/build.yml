@@ -7,6 +7,12 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -21,15 +27,48 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Verify build
+      - name: Build Linux binaries
         run: |
           set -euo pipefail
           go test ./...
+          mkdir -p dist page
           VERSION="$(git rev-parse --short HEAD)"
           LDFLAGS="-s -w -X main.version=${VERSION}"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -ldflags="${LDFLAGS}" -o /tmp/alfaos-linux-amd64 ./cmd/alfaos/
+            go build -ldflags="${LDFLAGS}" -o dist/alfaos-linux-amd64 ./cmd/alfaos/
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-            go build -ldflags="${LDFLAGS}" -o /tmp/alfaos-linux-arm64 ./cmd/alfaos/
-          /tmp/alfaos-linux-amd64 version
-          file /tmp/alfaos-linux-amd64 /tmp/alfaos-linux-arm64
+            go build -ldflags="${LDFLAGS}" -o dist/alfaos-linux-arm64 ./cmd/alfaos/
+          sha256sum dist/alfaos-linux-* > dist/SHA256SUMS
+          cp dist/alfaos-linux-* dist/SHA256SUMS page/
+          printf '%s\n' '<!DOCTYPE html><html><body>ALFAOS prebuilt binaries</body></html>' > page/index.html
+          ls -lh dist/
+
+      - name: Upload amd64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alfaos-linux-amd64
+          path: dist/alfaos-linux-amd64
+          retention-days: 90
+
+      - name: Upload arm64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alfaos-linux-arm64
+          path: dist/alfaos-linux-arm64
+          retention-days: 90
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: page
+
+  deploy-pages:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
