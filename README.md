@@ -89,7 +89,7 @@ alfaos:
 - Linux host (Debian/Ubuntu/Fedora/Arch)
 - Root access (`sudo`)
 - Hardware virtualization enabled in BIOS
-- At least 4 GB RAM and 20 GB free disk space
+- At least 3 GB RAM and 12 GB free disk space (VM RAM/disk auto-tuned to fit your host)
 - Internet connection for ISO download
 
 ## Connect via RDP

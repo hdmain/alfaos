@@ -159,12 +159,12 @@ func validateRequirements(req *Requirements) error {
 		errs = append(errs, "hardware virtualization (Intel VT-x / AMD-V) not available")
 	}
 
-	if req.MemoryMB > 0 && req.MemoryMB < 4096 {
-		errs = append(errs, fmt.Sprintf("insufficient RAM: %d MB (need at least 4096 MB)", req.MemoryMB))
+	if req.MemoryMB > 0 && req.MemoryMB < 3072 {
+		errs = append(errs, fmt.Sprintf("insufficient RAM: %d MB (need at least 3072 MB)", req.MemoryMB))
 	}
 
-	if req.DiskFreeGB > 0 && req.DiskFreeGB < 20 {
-		errs = append(errs, fmt.Sprintf("insufficient disk space: %d GB free (need at least 20 GB)", req.DiskFreeGB))
+	if req.DiskFreeGB > 0 && req.DiskFreeGB < 12 {
+		errs = append(errs, fmt.Sprintf("insufficient disk space: %d GB free (need at least 12 GB)", req.DiskFreeGB))
 	}
 
 	if len(errs) > 0 {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alfaos/alfaos/internal/logging"
 	"gopkg.in/yaml.v3"
 )
 
@@ -166,4 +167,46 @@ func (c *Config) EnsureDirs() error {
 		}
 	}
 	return nil
+}
+
+// AdaptToHost lowers VM resource requests when the host is tight on RAM or disk.
+func (c *Config) AdaptToHost(hostRAMMB, hostDiskGB int64) {
+	const (
+		hostReserveMB   = 768  // leave RAM for the host OS and libvirt
+		minHostRAMMB    = 3072 // minimum host RAM to attempt install
+		minVMRAMMB      = 2048 // minimum VM RAM after tuning
+		hostReserveGB   = 8    // leave disk for host OS, ISO cache, images
+		minVMDiskGB     = 16
+		absoluteMinDisk = 12
+	)
+
+	if hostRAMMB > 0 && hostRAMMB < minHostRAMMB {
+		return
+	}
+
+	if hostRAMMB > 0 && c.VM.RAM > 0 {
+		available := int(hostRAMMB - hostReserveMB)
+		if available < minVMRAMMB {
+			available = minVMRAMMB
+		}
+		available = (available / 256) * 256
+		if c.VM.RAM > available {
+			logging.Warn("Host RAM is %d MB — reducing VM RAM from %d MB to %d MB", hostRAMMB, c.VM.RAM, available)
+			c.VM.RAM = available
+		}
+	}
+
+	if hostDiskGB > 0 && c.VM.Disk > 0 {
+		available := int(hostDiskGB - hostReserveGB)
+		if available < minVMDiskGB {
+			available = minVMDiskGB
+		}
+		if available < absoluteMinDisk {
+			available = absoluteMinDisk
+		}
+		if c.VM.Disk > available {
+			logging.Warn("Host disk free is %d GB — reducing VM disk from %d GB to %d GB", hostDiskGB, c.VM.Disk, available)
+			c.VM.Disk = available
+		}
+	}
 }

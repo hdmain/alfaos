@@ -50,6 +50,7 @@ func (i *Installer) Run(force bool) error {
 	if err != nil {
 		return err
 	}
+	i.cfg.AdaptToHost(hostReq.MemoryMB, hostReq.DiskFreeGB)
 
 	// Step 2: Load KVM module
 	logging.Step(2, totalSteps, "Loading KVM kernel module")
