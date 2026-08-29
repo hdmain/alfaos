@@ -4,7 +4,7 @@ Automated Linux Framework for Alpha OS — a Go-based CLI that installs and conf
 
 ## One-line install
 
-Install the CLI (build from source on your machine):
+Downloads a pre-built binary from `dist/` in the repo (built automatically by GitHub Actions on every push to `main`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hdmain/alfaos/main/scripts/install.sh | sudo bash

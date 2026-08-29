@@ -1,4 +1,5 @@
 build/
 *.deb
+dist/*.deb
 /alfa1.jpeg
 /alfa2.jpeg

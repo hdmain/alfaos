@@ -15,6 +15,7 @@ import (
 var (
 	cfgFile string
 	force   bool
+	version = "dev"
 )
 
 func main() {
@@ -63,7 +64,7 @@ func main() {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("alfaos version 1.0.0")
+			fmt.Printf("alfaos version %s\n", version)
 		},
 	}
 

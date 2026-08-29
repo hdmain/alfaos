@@ -2,9 +2,8 @@
 # ALFAOS one-line installer — https://github.com/hdmain/alfaos
 set -euo pipefail
 
-REPO="${ALFAOS_REPO:-https://github.com/hdmain/alfaos.git}"
+GITHUB_REPO="${ALFAOS_GITHUB:-hdmain/alfaos}"
 BRANCH="${ALFAOS_BRANCH:-main}"
-INSTALL_DIR="${ALFAOS_INSTALL_DIR:-/tmp/alfaos-src-$$}"
 RUN_FULL=false
 
 usage() {
@@ -16,9 +15,13 @@ Usage:
   curl -fsSL ... | sudo bash -s -- --full
 
 Options:
-  --full, --install   Build CLI and run: alfaos install
-  --cli-only          Build CLI only (default)
+  --full, --install   Install CLI and run: alfaos install
+  --cli-only          Install CLI only (default)
   -h, --help          Show this help
+
+Environment:
+  ALFAOS_GITHUB   GitHub repo (default: hdmain/alfaos)
+  ALFAOS_BRANCH   Branch with dist/ binaries (default: main)
 EOF
 }
 
@@ -32,8 +35,8 @@ done
 
 if [ "$(id -u)" -ne 0 ]; then
   if command -v sudo >/dev/null 2>&1; then
-    exec sudo env ALFAOS_REPO="$REPO" ALFAOS_BRANCH="$BRANCH" bash -c \
-      "$(curl -fsSL "${REPO%.git}/raw/${BRANCH}/scripts/install.sh")" "$@"
+    exec sudo env ALFAOS_GITHUB="$GITHUB_REPO" ALFAOS_BRANCH="$BRANCH" bash -c \
+      "$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/scripts/install.sh")" "$@"
   fi
   echo "error: run as root or with sudo" >&2
   exit 1
@@ -43,36 +46,68 @@ need() {
   command -v "$1" >/dev/null 2>&1
 }
 
-install_build_deps() {
-  if need git && need go; then
+install_deps() {
+  if need curl; then
     return
   fi
-  echo "==> Installing build dependencies (git, golang)..."
+  echo "==> Installing curl..."
   if need apt-get; then
     apt-get update -qq
-    apt-get install -y -qq git golang-go curl ca-certificates
+    apt-get install -y -qq curl ca-certificates
   elif need dnf; then
-    dnf install -y git golang curl ca-certificates
+    dnf install -y curl ca-certificates
   elif need pacman; then
-    pacman -Sy --noconfirm git go curl ca-certificates
+    pacman -Sy --noconfirm curl ca-certificates
   else
-    echo "error: install git and go, then re-run" >&2
+    echo "error: install curl, then re-run" >&2
     exit 1
   fi
 }
 
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo amd64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *)
+      echo "error: unsupported architecture: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+install_binary() {
+  local arch bin url tmp
+  arch="$(detect_arch)"
+  bin="alfaos-linux-${arch}"
+  url="https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/dist/${bin}"
+  tmp="$(mktemp)"
+
+  echo "==> Downloading ${bin}..."
+  if ! curl -fsSL "$url" -o "$tmp"; then
+    echo "error: failed to download ${url}" >&2
+    exit 1
+  fi
+
+  install -m 755 "$tmp" /usr/local/bin/alfaos
+  rm -f "$tmp"
+  ln -sf /usr/local/bin/alfaos /alfaos
+}
+
+install_config() {
+  local raw_base="https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}"
+  mkdir -p /etc/alfaos /usr/share/alfaos/assets
+  curl -fsSL "${raw_base}/configs/default.yaml" -o /etc/alfaos/config.yaml
+  curl -fsSL "${raw_base}/assets/alfa1.jpeg" -o /usr/share/alfaos/assets/alfa1.jpeg 2>/dev/null || true
+  curl -fsSL "${raw_base}/assets/alfa2.jpeg" -o /usr/share/alfaos/assets/alfa2.jpeg 2>/dev/null || true
+}
+
 echo "==> ALFAOS one-line installer"
-echo "    repo:   $REPO"
-echo "    branch: $BRANCH"
+echo "    github: ${GITHUB_REPO}"
+echo "    branch: ${BRANCH}"
 
-install_build_deps
-
-rm -rf "$INSTALL_DIR"
-git clone --depth 1 --branch "$BRANCH" "$REPO" "$INSTALL_DIR"
-
-cd "$INSTALL_DIR"
-export DEBIAN_FRONTEND=noninteractive
-./scripts/build.sh
+install_deps
+install_binary
+install_config
 
 if [ "$RUN_FULL" = true ]; then
   echo ""
@@ -80,8 +115,7 @@ if [ "$RUN_FULL" = true ]; then
   alfaos install
 else
   echo ""
-  echo "ALFAOS CLI installed. Next step:"
-  echo "  sudo alfaos install"
+  echo "ALFAOS CLI installed."
+  echo "  alfaos version: $(alfaos version)"
+  echo "  next step:      sudo alfaos install"
 fi
-
-rm -rf "$INSTALL_DIR"

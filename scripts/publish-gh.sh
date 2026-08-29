@@ -20,10 +20,11 @@ fi
 echo "==> Creating public GitHub repo: $REPO_SLUG"
 if gh repo create "$REPO_SLUG" --public --source=. --remote=origin --push --description "$DESC"; then
   echo ""
-  echo "Published: https://github.com/$REPO_SLUG"
-  echo ""
-  echo "One-line install:"
-  echo "  curl -fsSL https://raw.githubusercontent.com/$REPO_SLUG/main/scripts/install.sh | sudo bash"
+echo "Published: https://github.com/$REPO_SLUG"
+echo ""
+echo "GitHub Actions will rebuild dist/ binaries on push to main."
+echo "One-line install:"
+echo "  curl -fsSL https://raw.githubusercontent.com/$REPO_SLUG/main/scripts/install.sh | sudo bash"
   exit 0
 fi
 
