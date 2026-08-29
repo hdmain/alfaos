@@ -1,0 +1,17 @@
+Source: alfaos
+Section: admin
+Priority: optional
+Maintainer: ALFAOS <alfaos@localhost>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 1.22)
+Standards-Version: 4.6.2
+Homepage: https://github.com/alfaos/alfaos
+Rules-Requires-Root: no
+
+Package: alfaos
+Architecture: amd64
+Depends: ${misc:Depends}, sudo, policykit-1
+Recommends: libvirt-clients, libvirt-daemon-system, qemu-kvm, virtinst, sshpass, freerdp2-x11 | rdesktop, wget, curl, openssh-client, genisoimage, bridge-utils, gdebi-core
+Description: Automated Linux Framework for Alpha OS
+ ALFAOS is a CLI that installs and configures a Debian XFCE desktop
+ inside a KVM/libvirt virtual machine with xRDP remote access,
+ custom theming, and automated verification.

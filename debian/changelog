@@ -1,0 +1,5 @@
+alfaos (1.0.0-1) unstable; urgency=medium
+
+  * Initial Debian package release.
+
+ -- ALFAOS <alfaos@localhost>  Sat, 29 Aug 2026 10:35:00 +0200

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ALFAOS Install
+GenericName=Install ALFAOS VM
+Comment=Install and configure the ALFAOS Debian desktop virtual machine
+Exec=pkexec alfaos install
+Icon=computer
+Terminal=true
+Categories=System;Settings;
+Keywords=alfaos;vm;virtual machine;debian;rdp;

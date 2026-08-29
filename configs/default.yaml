@@ -1,0 +1,35 @@
+vm:
+  name: alfaos
+  cpu: 4
+  ram_mb: 4096
+  disk_gb: 32
+  network: default
+  graphics: none
+
+debian:
+  version: ""   # auto-discover latest; set e.g. "13.6.0" to pin a release
+  arch: amd64
+  iso_base_url: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
+  iso_hash_url: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/SHA256SUMS"
+  mirror: "http://deb.debian.org/debian"
+
+alfaos:
+  username: alfaos
+  password: alfaos
+  hostname: alfaos
+  theme: Arc
+  icons: Papirus-Dark
+  wallpaper: alfa2.jpeg
+  terminal: tilix      # default terminal (tilix | xfce4-terminal)
+  browser: true        # firefox-esr
+  plank: true
+
+rdp:
+  port: 3389
+  width: 1920
+  height: 1080
+
+paths:
+  iso_cache: /var/lib/alfaos/iso
+  preseed_dir: /var/lib/alfaos/preseed
+  state_dir: /var/lib/alfaos/state

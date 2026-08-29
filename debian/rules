@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export CGO_ENABLED = 0
+export GOFLAGS = -trimpath
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	go build -ldflags="-s -w" -o alfaos ./cmd/alfaos/
+
+override_dh_auto_install:
+	install -d debian/alfaos/usr/bin
+	install -m 755 alfaos debian/alfaos/usr/bin/alfaos
+	install -d debian/alfaos/etc/alfaos
+	install -m 644 configs/default.yaml debian/alfaos/etc/alfaos/config.yaml
+	install -d debian/alfaos/usr/share/applications
+	install -m 644 debian/alfaos.desktop debian/alfaos/usr/share/applications/alfaos.desktop
+
+override_dh_auto_test:
