@@ -96,15 +96,15 @@ password inside the guest via SSH (starts the VM if it is stopped).`,
 
 	onioningCmd := &cobra.Command{
 		Use:   "onioning [on|off|status]",
-		Short: "Route all VM internet traffic through Tor (RDP stays direct)",
-		Long: `Enable or disable transparent Tor for the ALFAOS VM.
+		Short: "Route all VM internet through Tor with killswitch (or no net)",
+		Long: `Enable or disable Tor-only networking for the ALFAOS VM.
 
-  • on     — install Tor on the host and redirect guest TCP/DNS via Tor
-  • off    — remove Tor redirect; VM uses normal NAT again
-  • status — show whether onioning is active
+  • on     — Tor + killswitch: guest internet only via Tor; clearnet blocked
+  • off    — remove Tor redirect and killswitch; normal NAT again
+  • status — show whether onioning/killswitch is active
 
-RDP keeps working: clients connect to the host, which proxies to the VM
-locally. Only outbound internet from inside the VM goes through Tor.
+If Tor is down while onioning is on, the VM has no internet (fail-closed).
+RDP keeps working: clients connect to the host, which proxies to the VM locally.
 
 Examples:
   sudo alfaos onioning on

@@ -38,7 +38,7 @@ func ConfigureOnioning(enabled bool, stateDir, libvirtNetwork string) error {
 	gateway := libvirtGateway(libvirtNetwork, bridge)
 
 	if !enabled {
-		return disableOnioning(stateDir)
+		return disableOnioning(stateDir, bridge)
 	}
 	return enableOnioning(stateDir, bridge, subnet, gateway)
 }
@@ -72,15 +72,15 @@ func enableOnioning(stateDir, bridge, subnet, gateway string) error {
 		return fmt.Errorf("apply onion rules: %w\n%s", err, out)
 	}
 
-	logging.Success("Onioning ON — guest TCP/DNS → Tor; host RDP proxy → VM stays clear")
+	logging.Success("Onioning ON — Tor-only killswitch active (no clearnet from VM)")
 	logging.Info("From inside VM open https://check.torproject.org (use a NEW browser tab)")
-	logging.Info("If IP still leaks: sudo systemctl restart alfaos-onion && sudo alfaos onioning status")
+	logging.Info("If Tor is down, the VM has no internet — that is intentional")
 	return nil
 }
 
-func disableOnioning(stateDir string) error {
+func disableOnioning(stateDir, bridge string) error {
 	logging.Info("Disabling onioning...")
-	flushOnionRules("virbr0")
+	flushOnionRules(bridge)
 	_, _ = hostpkg.RunCommand("systemctl", "disable", "--now", "alfaos-onion.service")
 	_ = os.Remove(onionUnit)
 	_, _ = hostpkg.RunCommand("systemctl", "daemon-reload")
@@ -174,8 +174,10 @@ func waitTorBootstrap(timeout time.Duration, gateway string) error {
 
 func writeOnionApplyScript(path, bridge, subnet, gateway string) error {
 	script := fmt.Sprintf(`#!/bin/bash
-# ALFAOS onioning — redirect libvirt guest traffic into Tor.
-# REDIRECT from $BRIDGE rewrites destination to the bridge IP (%s), so Tor listens there.
+# ALFAOS onioning + killswitch
+# 1) REDIRECT guest TCP/DNS into Tor (dest becomes bridge IP %s)
+# 2) DROP every other packet leaving the guest bridge (no clearnet NAT)
+# RDP stays on host→guest (local OUTPUT), never hits FORWARD.
 set -euo pipefail
 BRIDGE=%q
 SUBNET=%q
@@ -183,12 +185,19 @@ GATEWAY=%q
 TRANSP=%d
 DNSPORT=%d
 CHAIN=%q
+KSCHAIN=%q
 NFTTABLE=%q
 
 flush_iptables() {
   iptables -t nat -D PREROUTING -i "$BRIDGE" -j "$CHAIN" 2>/dev/null || true
   iptables -t nat -F "$CHAIN" 2>/dev/null || true
   iptables -t nat -X "$CHAIN" 2>/dev/null || true
+  iptables -D FORWARD -i "$BRIDGE" -o "$BRIDGE" -j ACCEPT 2>/dev/null || true
+  iptables -D FORWARD -i "$BRIDGE" -j DROP 2>/dev/null || true
+  iptables -D FORWARD -o "$BRIDGE" ! -i "$BRIDGE" -j DROP 2>/dev/null || true
+  iptables -F "$KSCHAIN" 2>/dev/null || true
+  iptables -D FORWARD -j "$KSCHAIN" 2>/dev/null || true
+  iptables -X "$KSCHAIN" 2>/dev/null || true
 }
 
 flush_nft() {
@@ -208,14 +217,19 @@ flush_iptables
 flush_nft
 flush_ip6
 
-# Allow DNAT to localhost if used elsewhere
 sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null
 sysctl -w "net.ipv4.conf.${BRIDGE}.route_localnet=1" >/dev/null 2>/dev/null || true
 
-# Prefer nftables (libvirt on modern Debian uses nft; iptables-only can be ignored)
+# Kill existing clearnet flows from the guest so nothing keeps using MASQUERADE
+if command -v conntrack >/dev/null 2>&1; then
+  conntrack -D -s "$SUBNET" 2>/dev/null || true
+  conntrack -D -d "$SUBNET" 2>/dev/null || true
+fi
+
 if command -v nft >/dev/null 2>&1; then
   nft -f - <<EOF
 table ip ${NFTTABLE} {
+  # Torify guest outbound TCP + DNS (before libvirt NAT)
   chain prerouting {
     type nat hook prerouting priority -110; policy accept;
     iifname "${BRIDGE}" ip daddr ${SUBNET} return
@@ -224,9 +238,19 @@ table ip ${NFTTABLE} {
     iifname "${BRIDGE}" tcp dport 53 redirect to :${DNSPORT}
     iifname "${BRIDGE}" tcp flags syn / syn,rst redirect to :${TRANSP}
   }
+
+  # Killswitch: nothing from the guest leaves via FORWARD/MASQUERADE.
+  # Torified packets never reach FORWARD (they are locally delivered to Tor).
+  # If Tor is down, guest has zero internet — intentional.
+  chain forward {
+    type filter hook forward priority -150; policy accept;
+    iifname "${BRIDGE}" oifname "${BRIDGE}" accept
+    iifname "${BRIDGE}" counter drop
+    oifname "${BRIDGE}" iifname != "${BRIDGE}" counter drop
+  }
 }
 EOF
-  echo "alfaos-onion: nftables table ${NFTTABLE} installed"
+  echo "alfaos-onion: nftables Tor redirect + killswitch installed"
 else
   iptables -t nat -N "$CHAIN"
   iptables -t nat -A "$CHAIN" -d "$SUBNET" -j RETURN
@@ -235,33 +259,38 @@ else
   iptables -t nat -A "$CHAIN" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSPORT"
   iptables -t nat -A "$CHAIN" -p tcp --syn -j REDIRECT --to-ports "$TRANSP"
   iptables -t nat -A PREROUTING -i "$BRIDGE" -j "$CHAIN"
-  echo "alfaos-onion: iptables chain ${CHAIN} installed"
+
+  iptables -N "$KSCHAIN" 2>/dev/null || iptables -F "$KSCHAIN"
+  iptables -A "$KSCHAIN" -i "$BRIDGE" -o "$BRIDGE" -j ACCEPT
+  iptables -A "$KSCHAIN" -i "$BRIDGE" -j DROP
+  iptables -A "$KSCHAIN" -o "$BRIDGE" ! -i "$BRIDGE" -j DROP
+  iptables -I FORWARD 1 -j "$KSCHAIN"
+  echo "alfaos-onion: iptables Tor redirect + killswitch installed"
 fi
 
-# Block IPv6 from/to the VM bridge (Tor transparent proxy is IPv4-only → IPv6 would leak)
+# IPv6 killswitch (Tor transparent path is IPv4-only)
 if command -v ip6tables >/dev/null 2>&1; then
-  ip6tables -I FORWARD -i "$BRIDGE" -j DROP
-  ip6tables -I FORWARD -o "$BRIDGE" -j DROP
+  ip6tables -I FORWARD 1 -i "$BRIDGE" -j DROP
+  ip6tables -I FORWARD 1 -o "$BRIDGE" -j DROP
 fi
 
-# Quick sanity: Tor must accept connections on the gateway IP
 if ! ss -tln | grep -q ":${TRANSP}"; then
-  echo "WARNING: nothing listening on :${TRANSP}" >&2
+  echo "WARNING: nothing listening on :${TRANSP} — killswitch will block ALL guest internet" >&2
 fi
 if [ -n "$GATEWAY" ] && [ "$GATEWAY" != "127.0.0.1" ]; then
   if ! ss -tln | grep -qE "${GATEWAY}:${TRANSP}|\\*:${TRANSP}|0\\.0\\.0\\.0:${TRANSP}"; then
-    echo "WARNING: Tor may not be listening on ${GATEWAY}:${TRANSP} (REDIRECT target)" >&2
+    echo "WARNING: Tor not on ${GATEWAY}:${TRANSP} — guest TCP will fail closed (killswitch)" >&2
     ss -tlnp | grep "${TRANSP}" || true
   fi
 fi
-`, gateway, bridge, subnet, gateway, torTransPort, torDNSPort, onionChain, nftTable)
+`, gateway, bridge, subnet, gateway, torTransPort, torDNSPort, onionChain, onionChain+"KS", nftTable)
 
 	return os.WriteFile(path, []byte(script), 0755)
 }
 
 func installOnionService(scriptPath, bridge string) error {
 	unit := fmt.Sprintf(`[Unit]
-Description=ALFAOS onioning (Tor transparent proxy for libvirt VMs)
+Description=ALFAOS onioning (Tor-only killswitch for libvirt VMs)
 After=network-online.target libvirtd.service tor.service
 Wants=network-online.target
 Requires=tor.service
@@ -270,11 +299,11 @@ Requires=tor.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=%s
-ExecStop=/bin/bash -c 'nft delete table ip alfaos_onion 2>/dev/null || true; iptables -t nat -D PREROUTING -i %s -j ALFAOS_ONION 2>/dev/null || true; iptables -t nat -F ALFAOS_ONION 2>/dev/null || true; iptables -t nat -X ALFAOS_ONION 2>/dev/null || true; ip6tables -D FORWARD -i %s -j DROP 2>/dev/null || true; ip6tables -D FORWARD -o %s -j DROP 2>/dev/null || true; true'
+ExecStop=/bin/bash -c 'nft delete table ip alfaos_onion 2>/dev/null || true; iptables -t nat -D PREROUTING -i %s -j ALFAOS_ONION 2>/dev/null || true; iptables -t nat -F ALFAOS_ONION 2>/dev/null || true; iptables -t nat -X ALFAOS_ONION 2>/dev/null || true; iptables -D FORWARD -j ALFAOS_ONIONKS 2>/dev/null || true; iptables -F ALFAOS_ONIONKS 2>/dev/null || true; iptables -X ALFAOS_ONIONKS 2>/dev/null || true; iptables -D FORWARD -i %s -o %s -j ACCEPT 2>/dev/null || true; iptables -D FORWARD -i %s -j DROP 2>/dev/null || true; iptables -D FORWARD -o %s ! -i %s -j DROP 2>/dev/null || true; ip6tables -D FORWARD -i %s -j DROP 2>/dev/null || true; ip6tables -D FORWARD -o %s -j DROP 2>/dev/null || true; true'
 
 [Install]
 WantedBy=multi-user.target
-`, scriptPath, bridge, bridge, bridge)
+`, scriptPath, bridge, bridge, bridge, bridge, bridge, bridge, bridge, bridge)
 
 	if err := os.WriteFile(onionUnit, []byte(unit), 0644); err != nil {
 		return err
@@ -293,6 +322,14 @@ func flushOnionRules(bridge string) {
 	_, _ = hostpkg.RunCommand("iptables", "-t", "nat", "-D", "PREROUTING", "-i", bridge, "-j", onionChain)
 	_, _ = hostpkg.RunCommand("iptables", "-t", "nat", "-F", onionChain)
 	_, _ = hostpkg.RunCommand("iptables", "-t", "nat", "-X", onionChain)
+	ks := onionChain + "KS"
+	_, _ = hostpkg.RunCommand("iptables", "-D", "FORWARD", "-j", ks)
+	_, _ = hostpkg.RunCommand("iptables", "-F", ks)
+	_, _ = hostpkg.RunCommand("iptables", "-X", ks)
+	_, _ = hostpkg.RunCommand("iptables", "-D", "FORWARD", "-i", bridge, "-o", bridge, "-j", "ACCEPT")
+	_, _ = hostpkg.RunCommand("iptables", "-D", "FORWARD", "-i", bridge, "-j", "DROP")
+	_, _ = hostpkg.RunCommand("bash", "-c",
+		fmt.Sprintf(`iptables -D FORWARD -o %s ! -i %s -j DROP 2>/dev/null || true`, bridge, bridge))
 	_, _ = hostpkg.RunCommand("ip6tables", "-D", "FORWARD", "-i", bridge, "-j", "DROP")
 	_, _ = hostpkg.RunCommand("ip6tables", "-D", "FORWARD", "-o", bridge, "-j", "DROP")
 }
@@ -413,8 +450,18 @@ func OnioningDiagnostics(libvirtNetwork string) string {
 
 	if _, err := hostpkg.RunCommand("nft", "list", "table", "ip", nftTable); err == nil {
 		b.WriteString("backend: nftables\n")
+		if out, err := hostpkg.RunCommand("nft", "list", "chain", "ip", nftTable, "forward"); err == nil && strings.Contains(out, "drop") {
+			b.WriteString("killswitch: ON (FORWARD drop)\n")
+		} else {
+			b.WriteString("killswitch: UNKNOWN\n")
+		}
 	} else {
 		b.WriteString("backend: iptables\n")
+		if _, err := hostpkg.RunCommand("iptables", "-n", "-L", onionChain+"KS"); err == nil {
+			b.WriteString("killswitch: ON (FORWARD drop)\n")
+		} else {
+			b.WriteString("killswitch: MISSING\n")
+		}
 	}
 	return b.String()
 }

@@ -138,7 +138,7 @@ sudo alfaos passwd --password 'your-new-password'
 
 ### Onioning (Tor)
 
-Route **all outbound internet** from the ALFAOS VM through Tor on the host. RDP stays normal — you still connect to the VPS IP; only traffic originating inside the desktop goes through Tor.
+Route **all outbound internet** from the ALFAOS VM through Tor on the host, with a **killswitch**: any packet that is not torified is dropped. If Tor is down, the VM has **no internet**. RDP stays normal (host proxy → VM locally).
 
 ```bash
 sudo alfaos onioning on
@@ -146,7 +146,7 @@ alfaos onioning status
 sudo alfaos onioning off
 ```
 
-Inside the VM, verify with https://check.torproject.org. UDP (except DNS) does not work through Tor.
+Inside the VM, verify with https://check.torproject.org. UDP (except DNS) does not work through Tor and is blocked by the killswitch.
 
 ## Requirements
 
