@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alfaos/alfaos/internal/backup"
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/connect"
 	"github.com/alfaos/alfaos/internal/install"
@@ -115,6 +116,40 @@ Examples:
 	}
 	onioningCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
 
+	exportCmd := &cobra.Command{
+		Use:   "export <file.tar.gz>",
+		Short: "Export config + VM disk to a single .tar.gz backup",
+		Long: `Shut down the VM (if running) and pack into one archive:
+
+  • config.yaml
+  • domain.xml (libvirt)
+  • disk.qcow2
+  • boot kernel/initrd (if present)
+
+Example:
+  sudo alfaos export /root/alfaos-backup.tar.gz`,
+		Args: cobra.ExactArgs(1),
+		RunE: runExport,
+	}
+	exportCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
+
+	importCmd := &cobra.Command{
+		Use:   "import <file.tar.gz>",
+		Short: "Import config + VM disk from an alfaos export archive",
+		Long: `Restore ALFAOS from a .tar.gz created by alfaos export.
+
+Replaces /etc/alfaos/config.yaml, restores the qcow2 disk, and defines the
+libvirt domain. Use --force if a VM with the same name already exists.
+
+Example:
+  sudo alfaos import /root/alfaos-backup.tar.gz
+  sudo alfaos import /root/alfaos-backup.tar.gz --force`,
+		Args: cobra.ExactArgs(1),
+		RunE: runImport,
+	}
+	importCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to write config (default: /etc/alfaos/config.yaml)")
+	importCmd.Flags().BoolVar(&force, "force", false, "Replace existing VM with the same name")
+
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
@@ -123,11 +158,36 @@ Examples:
 		},
 	}
 
-	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, onioningCmd, versionCmd)
+	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, onioningCmd, exportCmd, importCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func runExport(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("alfaos export must be run as root: sudo alfaos export <file.tar.gz>")
+	}
+	if err := virtualization.EnsureLibvirtAccess(); err != nil {
+		return err
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	return backup.Export(cfg, args[0])
+}
+
+func runImport(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("alfaos import must be run as root: sudo alfaos import <file.tar.gz>")
+	}
+	if err := virtualization.EnsureLibvirtAccess(); err != nil {
+		return err
+	}
+	cfgPath := config.ResolvePath(cfgFile)
+	return backup.Import(cfgPath, args[0], force)
 }
 
 func runOnioning(cmd *cobra.Command, args []string) error {

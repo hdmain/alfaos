@@ -148,6 +148,17 @@ sudo alfaos onioning off
 
 Inside the VM, verify with https://check.torproject.org. UDP (except DNS) does not work through Tor and is blocked by the killswitch.
 
+### Backup / restore
+
+Export everything needed to move ALFAOS to another host (config + qcow2 disk) into one archive:
+
+```bash
+sudo alfaos export /root/alfaos-backup.tar.gz
+sudo alfaos import /root/alfaos-backup.tar.gz
+sudo alfaos import /root/alfaos-backup.tar.gz --force   # replace existing VM
+sudo alfaos start
+```
+
 ## Requirements
 
 - Linux host (Debian/Ubuntu/Fedora/Arch)
@@ -190,6 +201,8 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 | `alfaos reboot` | Reboot (or start if stopped) |
 | `alfaos passwd` | Change VM user password (config + guest) |
 | `alfaos onioning` | Route VM internet via Tor (`on` / `off` / `status`) |
+| `alfaos export` | Backup config + VM disk to `.tar.gz` |
+| `alfaos import` | Restore from `.tar.gz` (`--force` replaces existing VM) |
 | `alfaos version` | Print version |
 
 ## Desktop slimming
