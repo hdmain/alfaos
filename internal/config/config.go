@@ -61,6 +61,10 @@ type Config struct {
 		Servers []string `yaml:"servers"` // empty = use AdGuard default blocking DNS
 	} `yaml:"dns"`
 
+	// Onioning routes all VM outbound TCP/DNS through Tor on the host.
+	// RDP stays direct (host proxy → guest). Persisted by `alfaos onioning on|off`.
+	Onioning bool `yaml:"onioning"`
+
 	Paths struct {
 		ISOCache   string `yaml:"iso_cache"`
 		PreseedDir string `yaml:"preseed_dir"`
@@ -105,6 +109,8 @@ func Default() *Config {
 
 	// AdGuard DNS + Quad9 backup (blocks malware/DNSSEC)
 	c.DNS.Servers = []string{"94.140.14.14", "94.140.15.15", "9.9.9.11"}
+
+	c.Onioning = false
 
 	c.Paths.ISOCache = "/var/lib/alfaos/iso"
 	c.Paths.PreseedDir = "/var/lib/alfaos/preseed"

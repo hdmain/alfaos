@@ -94,6 +94,27 @@ password inside the guest via SSH (starts the VM if it is stopped).`,
 	passwdCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file (default: /etc/alfaos/config.yaml)")
 	passwdCmd.Flags().StringVar(&newPassword, "password", "", "New password (non-interactive; avoid on shared shells)")
 
+	onioningCmd := &cobra.Command{
+		Use:   "onioning [on|off|status]",
+		Short: "Route all VM internet traffic through Tor (RDP stays direct)",
+		Long: `Enable or disable transparent Tor for the ALFAOS VM.
+
+  • on     — install Tor on the host and redirect guest TCP/DNS via Tor
+  • off    — remove Tor redirect; VM uses normal NAT again
+  • status — show whether onioning is active
+
+RDP keeps working: clients connect to the host, which proxies to the VM
+locally. Only outbound internet from inside the VM goes through Tor.
+
+Examples:
+  sudo alfaos onioning on
+  sudo alfaos onioning off
+  alfaos onioning status`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runOnioning,
+	}
+	onioningCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
+
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
@@ -102,10 +123,60 @@ password inside the guest via SSH (starts the VM if it is stopped).`,
 		},
 	}
 
-	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, versionCmd)
+	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, onioningCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+func runOnioning(cmd *cobra.Command, args []string) error {
+	action := "status"
+	if len(args) > 0 {
+		action = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+
+	cfgPath := config.ResolvePath(cfgFile)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	switch action {
+	case "status", "":
+		active := networking.OnioningActive()
+		fmt.Printf("onioning config: %v\n", cfg.Onioning)
+		fmt.Printf("onioning active: %v\n", active)
+		if active {
+			fmt.Println("VM outbound TCP/DNS → Tor; RDP host→VM remains direct")
+		}
+		return nil
+	case "on", "true", "enable", "1":
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("alfaos onioning on must be run as root: sudo alfaos onioning on")
+		}
+		if err := networking.ConfigureOnioning(true, cfg.Paths.StateDir, cfg.VM.Network); err != nil {
+			return err
+		}
+		cfg.Onioning = true
+		if err := config.Save(cfg, cfgPath); err != nil {
+			logging.Warn("Could not save config: %v", err)
+		}
+		return nil
+	case "off", "false", "disable", "0":
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("alfaos onioning off must be run as root: sudo alfaos onioning off")
+		}
+		if err := networking.ConfigureOnioning(false, cfg.Paths.StateDir, cfg.VM.Network); err != nil {
+			return err
+		}
+		cfg.Onioning = false
+		if err := config.Save(cfg, cfgPath); err != nil {
+			logging.Warn("Could not save config: %v", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("usage: alfaos onioning [on|off|status]")
 	}
 }
 

@@ -88,6 +88,11 @@ func (i *Installer) Run(force bool) error {
 	if err := networking.ConfigureLibvirtDNS(i.cfg.VM.Network, i.cfg.DNSServers()); err != nil {
 		logging.Warn("Libvirt DNS config: %v", err)
 	}
+	if i.cfg.Onioning {
+		if err := networking.ConfigureOnioning(true, i.cfg.Paths.StateDir, i.cfg.VM.Network); err != nil {
+			logging.Warn("Onioning: %v", err)
+		}
+	}
 
 	if err := <-isoDone; err != nil {
 		return err

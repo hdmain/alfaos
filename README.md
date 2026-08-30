@@ -136,6 +136,18 @@ Prompts for a new password, updates `/etc/alfaos/config.yaml`, and changes the u
 sudo alfaos passwd --password 'your-new-password'
 ```
 
+### Onioning (Tor)
+
+Route **all outbound internet** from the ALFAOS VM through Tor on the host. RDP stays normal — you still connect to the VPS IP; only traffic originating inside the desktop goes through Tor.
+
+```bash
+sudo alfaos onioning on
+alfaos onioning status
+sudo alfaos onioning off
+```
+
+Inside the VM, verify with https://check.torproject.org. UDP (except DNS) does not work through Tor.
+
 ## Requirements
 
 - Linux host (Debian/Ubuntu/Fedora/Arch)
@@ -177,6 +189,7 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 | `alfaos shutdown` | Graceful shutdown |
 | `alfaos reboot` | Reboot (or start if stopped) |
 | `alfaos passwd` | Change VM user password (config + guest) |
+| `alfaos onioning` | Route VM internet via Tor (`on` / `off` / `status`) |
 | `alfaos version` | Print version |
 
 ## Desktop slimming
