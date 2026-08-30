@@ -2,15 +2,19 @@ package backup
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/klauspost/pgzip"
 
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/host"
@@ -18,6 +22,12 @@ import (
 	"github.com/alfaos/alfaos/internal/networking"
 	"github.com/alfaos/alfaos/internal/virtualization"
 )
+
+// Parallel gzip: ~1 MiB blocks keep all cores busy on large qcow2 streams.
+const gzipBlockSize = 1 << 20
+
+// copyBufSize is large enough for sequential disk I/O without starving compressors.
+const copyBufSize = 4 << 20
 
 const (
 	archiveConfig = "config.yaml"
@@ -99,17 +109,6 @@ func Export(cfg *config.Config, dest string) error {
 		}
 	}
 
-	f, err := os.Create(dest)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", dest, err)
-	}
-	defer f.Close()
-
-	gw := gzip.NewWriter(f)
-	defer gw.Close()
-	tw := tar.NewWriter(gw)
-	defer tw.Close()
-
 	files := []struct {
 		name string
 		path string
@@ -129,11 +128,9 @@ func Export(cfg *config.Config, dest string) error {
 		files = append(files, struct{ name, path string }{archiveBootInitrd, bootInitrd})
 	}
 
-	for _, item := range files {
-		logging.Info("Adding %s...", item.name)
-		if err := addFileToTar(tw, item.name, item.path); err != nil {
-			return err
-		}
+	if err := writeTarGz(dest, files); err != nil {
+		_ = os.Remove(dest)
+		return err
 	}
 
 	logging.Success("Exported ALFAOS backup to %s", dest)
@@ -264,6 +261,76 @@ func rewriteDomainPaths(xml string, cfg *config.Config, diskPath string) string 
 	return xml
 }
 
+// writeTarGz packs files into dest using all CPU cores for gzip (pigz if available, else pgzip).
+func writeTarGz(dest string, files []struct{ name, path string }) error {
+	f, err := os.Create(dest)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dest, err)
+	}
+	defer f.Close()
+
+	ncpu := runtime.GOMAXPROCS(0)
+	var compress io.WriteCloser
+	var wait func() error
+
+	if pigzPath, lookErr := exec.LookPath("pigz"); lookErr == nil {
+		logging.Info("Compressing with pigz on %d cores (gzip default level)...", ncpu)
+		cmd := exec.Command(pigzPath, "-p", strconv.Itoa(ncpu))
+		cmd.Stdout = f
+		cmd.Stderr = os.Stderr
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return err
+		}
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start pigz: %w", err)
+		}
+		compress = stdin
+		wait = cmd.Wait
+	} else {
+		logging.Info("Compressing with parallel gzip on %d cores (install pigz for even faster exports)...", ncpu)
+		gw, err := pgzip.NewWriterLevel(f, pgzip.DefaultCompression)
+		if err != nil {
+			return err
+		}
+		_ = gw.SetConcurrency(gzipBlockSize, ncpu)
+		compress = gw
+		wait = func() error { return nil }
+	}
+
+	tw := tar.NewWriter(compress)
+	for _, item := range files {
+		logging.Info("Adding %s...", item.name)
+		if err := addFileToTar(tw, item.name, item.path); err != nil {
+			_ = tw.Close()
+			_ = compress.Close()
+			if wait != nil {
+				_ = wait()
+			}
+			return err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		_ = compress.Close()
+		if wait != nil {
+			_ = wait()
+		}
+		return err
+	}
+	if err := compress.Close(); err != nil {
+		if wait != nil {
+			_ = wait()
+		}
+		return err
+	}
+	if wait != nil {
+		if err := wait(); err != nil {
+			return fmt.Errorf("pigz: %w", err)
+		}
+	}
+	return nil
+}
+
 func addFileToTar(tw *tar.Writer, name, path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -282,24 +349,61 @@ func addFileToTar(tw *tar.Writer, name, path string) error {
 		return err
 	}
 	defer f.Close()
-	_, err = io.Copy(tw, f)
+	buf := make([]byte, copyBufSize)
+	_, err = io.CopyBuffer(tw, f, buf)
 	return err
 }
 
 func extractTarGz(archive, destDir string) error {
-	f, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+	ncpu := runtime.GOMAXPROCS(0)
+	var (
+		reader io.Reader
+		closers []io.Closer
+		wait    func() error
+	)
 
-	gr, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("gzip: %w (need a .tar.gz from alfaos export)", err)
+	if pigzPath, lookErr := exec.LookPath("pigz"); lookErr == nil {
+		logging.Info("Decompressing with pigz on %d cores...", ncpu)
+		cmd := exec.Command(pigzPath, "-dc", "-p", strconv.Itoa(ncpu), archive)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start pigz: %w", err)
+		}
+		reader = stdout
+		closers = append(closers, stdout)
+		wait = cmd.Wait
+	} else {
+		logging.Info("Decompressing with parallel gzip on %d cores...", ncpu)
+		f, err := os.Open(archive)
+		if err != nil {
+			return err
+		}
+		closers = append(closers, f)
+		gr, err := pgzip.NewReaderN(f, gzipBlockSize, ncpu)
+		if err != nil {
+			for _, c := range closers {
+				_ = c.Close()
+			}
+			return fmt.Errorf("gzip: %w (need a .tar.gz from alfaos export)", err)
+		}
+		closers = append(closers, gr)
+		reader = gr
 	}
-	defer gr.Close()
+	defer func() {
+		for i := len(closers) - 1; i >= 0; i-- {
+			_ = closers[i].Close()
+		}
+		if wait != nil {
+			_ = wait()
+		}
+	}()
 
-	tr := tar.NewReader(gr)
+	tr := tar.NewReader(reader)
+	buf := make([]byte, copyBufSize)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -324,7 +428,7 @@ func extractTarGz(archive, destDir string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, tr); err != nil {
+		if _, err := io.CopyBuffer(out, tr, buf); err != nil {
 			out.Close()
 			return err
 		}
@@ -344,7 +448,8 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, in)
+	buf := make([]byte, copyBufSize)
+	_, err = io.CopyBuffer(out, in, buf)
 	return err
 }
 

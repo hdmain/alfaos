@@ -159,6 +159,8 @@ sudo alfaos import /root/alfaos-backup.tar.gz --force   # replace existing VM
 sudo alfaos start
 ```
 
+Export/import use **all CPU cores** for gzip (parallel). If `pigz` is installed (`apt install pigz`), it is preferred for maximum throughput; otherwise the built-in parallel gzip is used. Compression level stays at gzip default (good ratio).
+
 ## Requirements
 
 - Linux host (Debian/Ubuntu/Fedora/Arch)
