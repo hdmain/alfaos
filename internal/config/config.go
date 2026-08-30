@@ -93,7 +93,7 @@ func Default() *Config {
 	c.ALFAOS.Hostname = "alfaos"
 	c.ALFAOS.Theme = "Alfa"
 	c.ALFAOS.Icons = "Papirus-Dark"
-	c.ALFAOS.Wallpaper = "alfa2.jpeg"
+	c.ALFAOS.Wallpaper = "alfaos3.png"
 	c.ALFAOS.Terminal = "tilix"
 	c.ALFAOS.Browser = true
 	c.ALFAOS.Plank = true

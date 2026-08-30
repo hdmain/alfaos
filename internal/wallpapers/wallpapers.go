@@ -12,7 +12,7 @@ import (
 	"github.com/alfaos/alfaos/internal/virtualization"
 )
 
-//go:embed assets/alfa1.jpeg assets/alfa2.jpeg
+//go:embed assets/alfa1.jpeg assets/alfa2.jpeg assets/alfaos3.png
 var embeddedFS embed.FS
 
 type Manager struct {
@@ -25,7 +25,7 @@ func New(cfg *config.Config, vm *virtualization.Manager) *Manager {
 }
 
 func (w *Manager) ExtractToStateDir() error {
-	names := []string{"alfa1.jpeg", "alfa2.jpeg"}
+	names := []string{"alfa1.jpeg", "alfa2.jpeg", "alfaos3.png"}
 	for _, name := range names {
 		data, err := embeddedFS.ReadFile("assets/" + name)
 		if err != nil {
@@ -51,7 +51,7 @@ func (w *Manager) Install(ip string) error {
 		return err
 	}
 
-	for _, name := range []string{"alfa1.jpeg", "alfa2.jpeg"} {
+	for _, name := range []string{"alfa1.jpeg", "alfa2.jpeg", "alfaos3.png"} {
 		local := filepath.Join(w.cfg.Paths.StateDir, name)
 		remote := "/tmp/" + name
 		if err := w.vm.CopyFile(ip, local, remote); err != nil {
@@ -64,7 +64,7 @@ func (w *Manager) Install(ip string) error {
 }
 
 func (w *Manager) Verify(ip string) bool {
-	out, err := w.vm.RunSSH(ip, "test -f /usr/share/backgrounds/alfaos/alfa1.jpeg && echo ok")
+	out, err := w.vm.RunSSH(ip, "test -f /usr/share/backgrounds/alfaos/alfaos3.png && echo ok")
 	return err == nil && len(out) > 0
 }
 
@@ -73,7 +73,7 @@ func CopyFromWorkspace(srcDir, destDir string) error {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}
-	for _, name := range []string{"alfa1.jpeg", "alfa2.jpeg"} {
+	for _, name := range []string{"alfa1.jpeg", "alfa2.jpeg", "alfaos3.png"} {
 		src := filepath.Join(srcDir, name)
 		dst := filepath.Join(destDir, name)
 		if err := copyFile(src, dst); err != nil {

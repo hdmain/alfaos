@@ -20,7 +20,7 @@ func Install(cfg *config.Config, vm *virtualization.Manager, wall *wallpapers.Ma
 	if err := wall.ExtractToStateDir(); err != nil {
 		return err
 	}
-	for _, name := range []string{"alfa1.jpeg", "alfa2.jpeg"} {
+	for _, name := range []string{"alfa1.jpeg", "alfa2.jpeg", "alfaos3.png"} {
 		local := filepath.Join(cfg.Paths.StateDir, name)
 		if err := vm.CopyFile(ip, local, "/tmp/"+name); err != nil {
 			return fmt.Errorf("copy wallpaper %s: %w", name, err)

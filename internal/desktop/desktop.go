@@ -30,7 +30,7 @@ func (d *Configurator) InstallScript(rdpSection string) string {
 	}
 	wallpaper := d.cfg.ALFAOS.Wallpaper
 	if wallpaper == "" {
-		wallpaper = "alfa2.jpeg"
+		wallpaper = "alfaos3.png"
 	}
 	wallPath := "/usr/share/backgrounds/alfaos/" + wallpaper
 	themePackages := themePackages(theme)
@@ -184,6 +184,7 @@ echo "==> Installing wallpapers..."
 sudo mkdir -p /usr/share/backgrounds/alfaos
 sudo cp /tmp/alfa1.jpeg /usr/share/backgrounds/alfaos/alfa1.jpeg
 sudo cp /tmp/alfa2.jpeg /usr/share/backgrounds/alfaos/alfa2.jpeg
+sudo cp /tmp/alfaos3.png /usr/share/backgrounds/alfaos/alfaos3.png
 
 echo "==> Writing XFCE configuration..."
 mkdir -p /home/alfaos/.config/{xfce4/xfconf/xfce-perchannel-xml,gtk-3.0,autostart}

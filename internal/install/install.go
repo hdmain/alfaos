@@ -327,7 +327,7 @@ func findAssetsDir() string {
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "share", "alfaos", "assets"),
 	}
 	for _, c := range candidates {
-		if _, err := os.Stat(filepath.Join(c, "alfa1.jpeg")); err == nil {
+		if _, err := os.Stat(filepath.Join(c, "alfaos3.png")); err == nil {
 			return c
 		}
 	}

@@ -50,7 +50,7 @@ func (v *Verifier) RunAll(hostReq *host.Requirements) (bool, error) {
 		} else {
 			v.add("Plank installed", true, "skipped (disabled)")
 		}
-		v.checkRemote("Wallpaper installed", "test -f /usr/share/backgrounds/alfaos/alfa1.jpeg && echo ok")
+		v.checkRemote("Wallpaper installed", "test -f /usr/share/backgrounds/alfaos/alfaos3.png && echo ok")
 		v.checkRemote("RDP server installed", "dpkg -l xrdp 2>/dev/null | grep -q ^ii && echo ok")
 		v.checkRemote("RDP service running", "systemctl is-active xrdp 2>/dev/null | grep -q active && echo ok")
 		v.add("Network connectivity", networking.TestPing(v.vmIP), v.vmIP)

@@ -19,7 +19,7 @@ alfaos:
   hostname: alfaos
   theme: Alfa      # Alfa (red accents), Arc, Dracula, or Gruvbox
   icons: Papirus-Dark
-  wallpaper: alfa2.jpeg
+  wallpaper: alfaos3.png
   terminal: tilix      # default terminal (tilix | xfce4-terminal)
   browser: true        # firefox-esr
   plank: true
