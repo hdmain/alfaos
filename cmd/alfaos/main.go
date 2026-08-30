@@ -147,6 +147,7 @@ func runOnioning(cmd *cobra.Command, args []string) error {
 		active := networking.OnioningActive()
 		fmt.Printf("onioning config: %v\n", cfg.Onioning)
 		fmt.Printf("onioning active: %v\n", active)
+		fmt.Print(networking.OnioningDiagnostics(cfg.VM.Network))
 		if active {
 			fmt.Println("VM outbound TCP/DNS → Tor; RDP host→VM remains direct")
 		}
