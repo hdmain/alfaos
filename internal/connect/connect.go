@@ -8,11 +8,12 @@ import (
 	"strings"
 
 	"github.com/alfaos/alfaos/internal/config"
+	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/networking"
 )
 
 func Run(cfg *config.Config) error {
-	ip, err := ResolveVMIP(cfg)
+	ip, viaProxy, err := ResolveVMIP(cfg)
 	if err != nil {
 		return err
 	}
@@ -21,17 +22,21 @@ func Run(cfg *config.Config) error {
 	user := cfg.ALFAOS.Username
 	pass := cfg.ALFAOS.Password
 
-	fmt.Fprintf(os.Stderr, "Connecting to %s at %s...\n", ip, res)
+	if viaProxy {
+		fmt.Fprintf(os.Stderr, "Connecting via host proxy %s at %s (VM waking/stopped — higher latency)\n", ip, res)
+	} else {
+		fmt.Fprintf(os.Stderr, "Connecting directly to VM %s at %s...\n", ip, res)
+	}
 
 	for _, client := range []struct {
 		bin  string
 		run  func(string) *exec.Cmd
 	}{
 		{"xfreerdp", func(b string) *exec.Cmd {
-			return exec.Command(b, "/v:"+ip, "/u:"+user, "/p:"+pass, "/size:"+res, "/cert:ignore", "+clipboard")
+			return exec.Command(b, xfreerdpArgs(ip, user, pass, res)...)
 		}},
 		{"xfreerdp3", func(b string) *exec.Cmd {
-			return exec.Command(b, "/v:"+ip, "/u:"+user, "/p:"+pass, "/size:"+res, "/cert:ignore", "+clipboard")
+			return exec.Command(b, xfreerdpArgs(ip, user, pass, res)...)
 		}},
 	} {
 		if _, err := exec.LookPath(client.bin); err == nil {
@@ -50,6 +55,7 @@ func Run(cfg *config.Config) error {
 			"-p", pass,
 			"-r", "clipboard:off",
 			"-a", "16",
+			"-x", "lan",
 			ip,
 		)
 		cmd.Stdin = os.Stdin
@@ -58,26 +64,65 @@ func Run(cfg *config.Config) error {
 		return cmd.Run()
 	}
 
-	return fmt.Errorf("no RDP client found — install: sudo apt install rdesktop freerdp3-x11")
+	return fmt.Errorf("no RDP client found — install: sudo apt install freerdp3-x11")
 }
 
-func ResolveVMIP(cfg *config.Config) (string, error) {
+// xfreerdpArgs returns low-latency flags for LAN/homelab use.
+func xfreerdpArgs(ip, user, pass, res string) []string {
+	return []string{
+		"/v:" + ip,
+		"/u:" + user,
+		"/p:" + pass,
+		"/size:" + res,
+		"/cert:ignore",
+		"+clipboard",
+		"/network:lan",
+		"/gfx",
+		"/rfx",
+		"/compression-level:2",
+		"/sound:off",
+	}
+}
+
+// ResolveVMIP returns the RDP target and whether traffic goes through the host proxy.
+// Direct VM IP is preferred when the guest is up — the userspace proxy adds noticeable lag.
+func ResolveVMIP(cfg *config.Config) (ip string, viaProxy bool, err error) {
+	port := cfg.RDP.Port
+	if port <= 0 {
+		port = 3389
+	}
+	portStr := fmt.Sprintf("%d", port)
+
+	if vmIP, err := lookupVMIP(cfg); err == nil {
+		if networking.TestPort(vmIP, portStr) {
+			return vmIP, false, nil
+		}
+		logging.Info("VM at %s:%d not reachable — using host proxy (wake-on-RDP)", vmIP, port)
+	}
+
 	if cfg.RDP.Expose {
-		port := fmt.Sprintf("%d", cfg.RDP.Port)
-		if networking.TestPort("127.0.0.1", port) {
-			return "127.0.0.1", nil
+		if networking.TestPort("127.0.0.1", portStr) {
+			return "127.0.0.1", true, nil
 		}
 		rdpFile := filepath.Join(cfg.Paths.StateDir, "rdp.address")
 		if data, err := os.ReadFile(rdpFile); err == nil {
-			if ip := strings.TrimSpace(string(data)); ip != "" {
-				return ip, nil
+			if host := strings.TrimSpace(string(data)); host != "" {
+				return host, true, nil
 			}
 		}
-		if ip := networking.GetHostPrimaryIPv4(); ip != "" {
-			return ip, nil
+		if host := networking.GetHostPrimaryIPv4(); host != "" {
+			return host, true, nil
 		}
 	}
 
+	if vmIP, err := lookupVMIP(cfg); err == nil {
+		return vmIP, false, nil
+	}
+
+	return "", false, fmt.Errorf("VM IP not found — run: sudo alfaos install (or start VM for direct RDP)")
+}
+
+func lookupVMIP(cfg *config.Config) (string, error) {
 	ipFile := filepath.Join(cfg.Paths.StateDir, "vm.ip")
 	if data, err := os.ReadFile(ipFile); err == nil {
 		if ip := strings.TrimSpace(string(data)); ip != "" {
@@ -87,7 +132,7 @@ func ResolveVMIP(cfg *config.Config) (string, error) {
 
 	out, err := runVirsh("domifaddr", cfg.VM.Name)
 	if err != nil {
-		return "", fmt.Errorf("VM IP not found — run: sudo alfaos install (or save IP to %s)", ipFile)
+		return "", err
 	}
 
 	for _, line := range strings.Split(out, "\n") {

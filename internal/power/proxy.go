@@ -102,18 +102,30 @@ func (p *Proxy) handle(client net.Conn) {
 
 	_ = client.SetDeadline(time.Time{})
 	_ = backend.SetDeadline(time.Time{})
+	setTCPNoDelay(client)
+	setTCPNoDelay(backend)
+
+	bufSize := 256 << 10
+	bufClient := make([]byte, bufSize)
+	bufBackend := make([]byte, bufSize)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
-		_, _ = io.Copy(backend, client)
+		_, _ = io.CopyBuffer(backend, client, bufClient)
 		cancel()
 	}()
 	go func() {
-		_, _ = io.Copy(client, backend)
+		_, _ = io.CopyBuffer(client, backend, bufBackend)
 		cancel()
 	}()
 	<-ctx.Done()
+}
+
+func setTCPNoDelay(conn net.Conn) {
+	if tc, ok := conn.(*net.TCPConn); ok {
+		_ = tc.SetNoDelay(true)
+	}
 }
 
 func (p *Proxy) ensureVMReady(timeout time.Duration) (string, error) {

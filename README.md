@@ -180,9 +180,13 @@ After installation completes (default resolution: 1920x1080):
 
 ```
 alfaos connect
-xfreerdp /v:<VM_IP> /u:alfaos /p:alfaos /size:1920x1080
-rdesktop <VM_IP> -u alfaos -p alfaos -g 1920x1080
+xfreerdp /v:<VM_IP> /u:alfaos /p:alfaos /size:1920x1080 /network:lan /gfx /rfx
+rdesktop <VM_IP> -u alfaos -p alfaos -g 1920x1080 -x lan
 ```
+
+`alfaos connect` uses the **VM IP directly** when the guest is running (lowest latency on homelab/LAN). Traffic goes through the host proxy only when the VM is stopped (wake-on-RDP). Lower `rdp.width` / `rdp.height` in config if it still feels sluggish.
+
+After upgrading, refresh xRDP tuning: `sudo alfaos expose-rdp`
 
 Resolution is configured in `configs/default.yaml` under `rdp.width` / `rdp.height`.
 

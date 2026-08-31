@@ -15,6 +15,7 @@ import (
 	"github.com/alfaos/alfaos/internal/networking"
 	"github.com/alfaos/alfaos/internal/passwd"
 	"github.com/alfaos/alfaos/internal/power"
+	"github.com/alfaos/alfaos/internal/rdp"
 	"github.com/alfaos/alfaos/internal/virtualization"
 	"github.com/spf13/cobra"
 )
@@ -359,6 +360,11 @@ func runExposeRDP(cmd *cobra.Command, args []string) error {
 	if err := networking.ExposeRDP(cfg, vmIP); err != nil {
 		return err
 	}
+	if vmIP != "" && vm.DomainRunning() {
+		if err := rdp.New(cfg, vm).ApplyTuning(vmIP); err != nil {
+			logging.Warn("RDP tune: %v (connect may feel laggy until VM is reconfigured)", err)
+		}
+	}
 	bind := cfg.RDP.BindHost
 	if bind == "" {
 		bind = "0.0.0.0"
@@ -378,6 +384,7 @@ func runExposeRDP(cmd *cobra.Command, args []string) error {
 	if cfg.Power.WakeOnRDP {
 		fmt.Println("Tip: VM may be shut down while idle — your RDP client will wake it (first connect can take 30–90s)")
 	}
+	fmt.Println("Tip: for lowest latency on LAN, connect directly to the VM IP (alfaos connect does this when the VM is running)")
 	return nil
 }
 

@@ -98,8 +98,20 @@ else
   sudo sed -i '/^\[Globals\]/a address=0.0.0.0' /etc/xrdp/xrdp.ini
 fi
 
-# rdesktop does not support drdynvc — keep it disabled for compatibility
-sudo sed -i 's/^drdynvc=.*/drdynvc=false/' /etc/xrdp/xrdp.ini 2>/dev/null || true
+# Enable GFX/dynamic channels for xfreerdp and Windows MSTSC (much smoother than legacy bitmap)
+sudo sed -i 's/^drdynvc=.*/drdynvc=true/' /etc/xrdp/xrdp.ini 2>/dev/null || true
+grep -q '^drdynvc=' /etc/xrdp/xrdp.ini 2>/dev/null || sudo sed -i '/^\[Globals\]/a drdynvc=true' /etc/xrdp/xrdp.ini
+
+# Low-latency LAN tuning
+for kv in tcp_nodelay=true tcp_keepalive=true bulk_compression=true new_cursors=true; do
+  key="${kv%%=*}"
+  val="${kv#*=}"
+  if grep -q "^${key}=" /etc/xrdp/xrdp.ini 2>/dev/null; then
+    sudo sed -i "s/^${key}=.*/${key}=${val}/" /etc/xrdp/xrdp.ini
+  else
+    sudo sed -i "/^\[Globals\]/a ${key}=${val}" /etc/xrdp/xrdp.ini
+  fi
+done
 
 # Reuse existing user session instead of spawning broken parallel displays
 sudo sed -i 's/^Policy=.*/Policy=UBD/' /etc/xrdp/sesman.ini 2>/dev/null || true
@@ -173,6 +185,25 @@ func (r *Configurator) Install(ip string) error {
 	}
 
 	logging.Success("RDP server installed and configured")
+	return nil
+}
+
+// ApplyTuning pushes xRDP performance settings to a running VM (no apt install).
+func (r *Configurator) ApplyTuning(ip string) error {
+	logging.Info("Applying RDP performance tuning on VM...")
+	localScript := r.cfg.Paths.StateDir + "/rdp-tune.sh"
+	if err := os.WriteFile(localScript, []byte(r.ConfigScript()), 0755); err != nil {
+		return fmt.Errorf("write rdp tune script: %w", err)
+	}
+	remoteScript := "/tmp/alfaos-rdp-tune.sh"
+	if err := r.vm.CopyFile(ip, localScript, remoteScript); err != nil {
+		return err
+	}
+	out, err := r.vm.RunSSH(ip, "chmod +x "+remoteScript+" && bash "+remoteScript)
+	if err != nil {
+		return fmt.Errorf("rdp tune failed: %w\n%s", err, out)
+	}
+	logging.Success("RDP performance tuning applied")
 	return nil
 }
 
