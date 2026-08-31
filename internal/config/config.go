@@ -64,6 +64,9 @@ type Config struct {
 	// Onioning routes all VM outbound TCP/DNS through Tor on the host.
 	// RDP stays direct (host proxy → guest). Persisted by `alfaos onioning on|off`.
 	Onioning bool `yaml:"onioning"`
+	// OnioningStable reuses one Tor exit IP for all VM traffic (~10 min rotation).
+	// When false, each destination/port gets a separate circuit (more private).
+	OnioningStable bool `yaml:"onioning_stable"`
 
 	Paths struct {
 		ISOCache   string `yaml:"iso_cache"`

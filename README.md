@@ -142,9 +142,14 @@ Route **all outbound internet** from the ALFAOS VM through Tor on the host, with
 
 ```bash
 sudo alfaos onioning on
+sudo alfaos onioning on --stable    # one exit IP for all sites (~10 min rotation)
+sudo alfaos onioning stable on      # switch to stable while onioning stays on
+sudo alfaos onioning stable off     # back to privacy mode (new IP per destination)
 alfaos onioning status
 sudo alfaos onioning off
 ```
+
+By default (`on` without `--stable`) each destination/port gets its own Tor exit for stronger privacy. **Stable mode** shares one exit IP across all VM traffic and rotates it about every 10 minutes.
 
 Inside the VM, verify with https://check.torproject.org. UDP (except DNS) does not work through Tor and is blocked by the killswitch.
 
@@ -202,7 +207,7 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 | `alfaos shutdown` | Graceful shutdown |
 | `alfaos reboot` | Reboot (or start if stopped) |
 | `alfaos passwd` | Change VM user password (config + guest) |
-| `alfaos onioning` | Route VM internet via Tor (`on` / `off` / `status`) |
+| `alfaos onioning` | Route VM internet via Tor (`on` / `off` / `stable` / `status`) |
 | `alfaos export` | Backup config + VM disk to `.tar.gz` |
 | `alfaos import` | Restore from `.tar.gz` (`--force` replaces existing VM) |
 | `alfaos version` | Print version |

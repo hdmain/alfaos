@@ -12,17 +12,20 @@ import (
 )
 
 const (
-	torTransPort = 9040
-	torDNSPort   = 5353
-	onionChain   = "ALFAOS_ONION"
-	nftTable     = "alfaos_onion"
-	torrcDropIn  = "/etc/tor/torrc.d/alfaos.conf"
-	onionUnit    = "/etc/systemd/system/alfaos-onion.service"
+	torTransPort        = 9040
+	torDNSPort          = 5353
+	torMaxCircuitDirty  = 600 // seconds; Tor default — stable mode rotates exit IP about every 10 min
+	onionChain          = "ALFAOS_ONION"
+	nftTable            = "alfaos_onion"
+	torrcDropIn         = "/etc/tor/torrc.d/alfaos.conf"
+	onionUnit           = "/etc/systemd/system/alfaos-onion.service"
 )
 
 // ConfigureOnioning enables or disables transparent Tor for all VM outbound traffic.
+// When stable is true, one shared exit circuit is used (~10 min rotation). Otherwise each
+// destination/port gets its own circuit for stronger isolation.
 // RDP stays reachable: host→VM traffic is not redirected; only guest→internet goes through Tor.
-func ConfigureOnioning(enabled bool, stateDir, libvirtNetwork string) error {
+func ConfigureOnioning(enabled bool, stable bool, stateDir, libvirtNetwork string) error {
 	if libvirtNetwork == "" {
 		libvirtNetwork = "default"
 	}
@@ -40,17 +43,22 @@ func ConfigureOnioning(enabled bool, stateDir, libvirtNetwork string) error {
 	if !enabled {
 		return disableOnioning(stateDir, bridge)
 	}
-	return enableOnioning(stateDir, bridge, subnet, gateway)
+	return enableOnioning(stateDir, bridge, subnet, gateway, stable)
 }
 
-func enableOnioning(stateDir, bridge, subnet, gateway string) error {
+func enableOnioning(stateDir, bridge, subnet, gateway string, stable bool) error {
 	logging.Info("Enabling onioning — VM outbound traffic via Tor (RDP remains direct)")
+	if stable {
+		logging.Info("Stable IP mode — one Tor exit for all traffic (~%d min rotation)", torMaxCircuitDirty/60)
+	} else {
+		logging.Info("Privacy mode — separate Tor exit per destination/port")
+	}
 	logging.Info("Bridge %s subnet %s gateway %s", bridge, subnet, gateway)
 
 	if err := ensureTorInstalled(); err != nil {
 		return err
 	}
-	if err := writeTorrc(gateway); err != nil {
+	if err := writeTorrc(gateway, stable); err != nil {
 		return err
 	}
 	if err := restartTor(); err != nil {
@@ -106,29 +114,37 @@ func ensureTorInstalled() error {
 	return nil
 }
 
-func writeTorrc(gateway string) error {
+func writeTorrc(gateway string, stable bool) error {
 	if err := os.MkdirAll("/etc/tor/torrc.d", 0755); err != nil {
 		return err
 	}
 	ensureTorInclude()
 
+	isolation := ""
+	stableLines := ""
+	if stable {
+		stableLines = fmt.Sprintf("MaxCircuitDirtiness %d\n", torMaxCircuitDirty)
+	} else {
+		isolation = " IsolateClientAddr IsolateDestAddr IsolateDestPort"
+	}
+
 	// REDIRECT from virbr0 rewrites dest to the bridge IP (e.g. 192.168.122.1),
 	// NOT 127.0.0.1 — Tor must listen on the gateway address (and localhost).
 	gwLine := ""
 	if gateway != "" && gateway != "127.0.0.1" {
-		gwLine = fmt.Sprintf("TransPort %s:%d IsolateClientAddr IsolateDestAddr IsolateDestPort\nDNSPort %s:%d\n",
-			gateway, torTransPort, gateway, torDNSPort)
+		gwLine = fmt.Sprintf("TransPort %s:%d%s\nDNSPort %s:%d\n",
+			gateway, torTransPort, isolation, gateway, torDNSPort)
 	}
 
 	conf := fmt.Sprintf(`# Managed by ALFAOS onioning — do not edit by hand
 # Transparent proxy for libvirt VMs; RDP is not torified (host→guest only).
 # IMPORTANT: REDIRECT to virbr0 targets the bridge IP, so TransPort must bind there.
-VirtualAddrNetworkIPv4 10.192.0.0/10
+%sVirtualAddrNetworkIPv4 10.192.0.0/10
 AutomapHostsOnResolve 1
-TransPort 127.0.0.1:%d IsolateClientAddr IsolateDestAddr IsolateDestPort
+TransPort 127.0.0.1:%d%s
 DNSPort 127.0.0.1:%d
 %sSocksPort 127.0.0.1:9050
-`, torTransPort, torDNSPort, gwLine)
+`, stableLines, torTransPort, isolation, torDNSPort, gwLine)
 
 	return os.WriteFile(torrcDropIn, []byte(conf), 0644)
 }

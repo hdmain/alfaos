@@ -228,7 +228,7 @@ func Import(cfgPath, archive string, force bool) error {
 	logging.Success("Config restored to %s", cfgPath)
 
 	if cfg.Onioning {
-		if err := networking.ConfigureOnioning(true, cfg.Paths.StateDir, cfg.VM.Network); err != nil {
+		if err := networking.ConfigureOnioning(true, cfg.OnioningStable, cfg.Paths.StateDir, cfg.VM.Network); err != nil {
 			logging.Warn("Onioning restore: %v", err)
 		}
 	}
