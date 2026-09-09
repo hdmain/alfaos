@@ -232,10 +232,12 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 Installed automatically during `alfaos install` (icon on Desktop). On an existing VM:
 
 ```bash
-# on Linux host (needs Rust only if dist binary missing)
-./scripts/build-alfa-center.sh
 sudo alfaos center-install
 ```
+
+If the binary is not on the host, `center-install` downloads it from GitHub Pages
+(`https://hdmain.github.io/alfaos/alfa-center`) or from the repo
+(`guest/alfa-center/dist/alfa-center` on `main`).
 
 
 ## Desktop slimming

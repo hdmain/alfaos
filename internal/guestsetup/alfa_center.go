@@ -2,15 +2,25 @@ package guestsetup
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/alfaos/alfaos/internal/centerapi"
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/virtualization"
+)
+
+const (
+	defaultGitHubRepo = "hdmain/alfaos"
+	defaultBranch     = "main"
+	minBinaryBytes    = 1024 * 100 // reject tiny HTML/error responses
 )
 
 // InstallAlfaCenter copies the Alfa Center GUI into the guest and writes API credentials.
@@ -25,9 +35,7 @@ func InstallAlfaCenter(cfg *config.Config, vm *virtualization.Manager, ip string
 
 	binLocal, err := resolveAlfaCenterBinary(cfg.Paths.StateDir)
 	if err != nil {
-		logging.Warn("Alfa Center binary not available: %v", err)
-		logging.Warn("Build it with: scripts/build-alfa-center.sh (or cargo build --release in guest/alfa-center)")
-		return nil
+		return fmt.Errorf("Alfa Center binary: %w", err)
 	}
 
 	if err := vm.CopyFile(ip, binLocal, "/tmp/alfa-center"); err != nil {
@@ -105,6 +113,37 @@ echo "Alfa Center installed"
 }
 
 func resolveAlfaCenterBinary(stateDir string) (string, error) {
+	if path, ok := findLocalAlfaCenter(stateDir); ok {
+		logging.Info("Using local Alfa Center binary: %s", path)
+		return path, nil
+	}
+
+	// Try building on host when cargo + sources are available (dev machines).
+	if runtime.GOOS == "linux" {
+		if crate := findAlfaCenterCrate(); crate != "" {
+			logging.Info("Building Alfa Center from source (%s)...", crate)
+			cmd := exec.Command("cargo", "build", "--release")
+			cmd.Dir = crate
+			cmd.Env = append(os.Environ(), "CARGO_TERM_COLOR=never")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				logging.Warn("cargo build failed: %v", err)
+				_ = out
+			} else {
+				built := filepath.Join(crate, "target/release/alfa-center")
+				stateBin := filepath.Join(stateDir, "alfa-center")
+				_ = os.MkdirAll(stateDir, 0755)
+				if err := copyFileLocal(built, stateBin); err == nil {
+					return stateBin, nil
+				}
+				return built, nil
+			}
+		}
+	}
+
+	return downloadAlfaCenter(stateDir)
+}
+
+func findLocalAlfaCenter(stateDir string) (string, bool) {
 	candidates := []string{
 		filepath.Join(stateDir, "alfa-center"),
 		"/usr/share/alfaos/alfa-center",
@@ -112,15 +151,14 @@ func resolveAlfaCenterBinary(stateDir string) (string, error) {
 		"guest/alfa-center/dist/alfa-center",
 		"guest/alfa-center/target/release/alfa-center",
 	}
-	// Next to the alfaos module root when running from repo
 	if exe, err := os.Executable(); err == nil {
 		root := filepath.Dir(exe)
 		candidates = append(candidates,
 			filepath.Join(root, "guest/alfa-center/dist/alfa-center"),
 			filepath.Join(root, "..", "guest/alfa-center/dist/alfa-center"),
+			filepath.Join(root, "alfa-center"),
 		)
 	}
-	// Walk up from cwd looking for the crate
 	if wd, err := os.Getwd(); err == nil {
 		dir := wd
 		for i := 0; i < 6; i++ {
@@ -137,37 +175,114 @@ func resolveAlfaCenterBinary(stateDir string) (string, error) {
 	}
 
 	for _, c := range candidates {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() && st.Size() > 0 {
-			return c, nil
+		if st, err := os.Stat(c); err == nil && !st.IsDir() && st.Size() >= minBinaryBytes {
+			if isELF(c) {
+				return c, true
+			}
 		}
 	}
+	return "", false
+}
 
-	// Try building on host when cargo is available (Linux install hosts).
-	if runtime.GOOS == "linux" {
-		crate := findAlfaCenterCrate()
-		if crate != "" {
-			logging.Info("Building Alfa Center from source (%s)...", crate)
-			cmd := exec.Command("cargo", "build", "--release")
-			cmd.Dir = crate
-			cmd.Env = append(os.Environ(), "CARGO_TERM_COLOR=never")
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return "", fmt.Errorf("cargo build: %w\n%s", err, out)
-			}
-			built := filepath.Join(crate, "target/release/alfa-center")
-			distDir := filepath.Join(crate, "dist")
-			_ = os.MkdirAll(distDir, 0755)
-			dist := filepath.Join(distDir, "alfa-center")
-			_ = copyFileLocal(built, dist)
-			_ = os.MkdirAll(stateDir, 0755)
-			stateBin := filepath.Join(stateDir, "alfa-center")
-			if err := copyFileLocal(built, stateBin); err == nil {
-				return stateBin, nil
-			}
-			return built, nil
-		}
+func downloadAlfaCenter(stateDir string) (string, error) {
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return "", err
+	}
+	dest := filepath.Join(stateDir, "alfa-center")
+	repo := strings.TrimSpace(os.Getenv("ALFAOS_GITHUB"))
+	if repo == "" {
+		repo = defaultGitHubRepo
+	}
+	branch := strings.TrimSpace(os.Getenv("ALFAOS_BRANCH"))
+	if branch == "" {
+		branch = defaultBranch
+	}
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" {
+		return "", fmt.Errorf("invalid ALFAOS_GITHUB %q (want owner/repo)", repo)
 	}
 
-	return "", fmt.Errorf("binary not found (expected guest/alfa-center/dist/alfa-center)")
+	urls := []string{
+		fmt.Sprintf("https://%s.github.io/%s/alfa-center", owner, name),
+		fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/guest/alfa-center/dist/alfa-center", repo, branch),
+		fmt.Sprintf("https://github.com/%s/raw/%s/guest/alfa-center/dist/alfa-center", repo, branch),
+	}
+
+	var lastErr error
+	for _, url := range urls {
+		logging.Info("Downloading Alfa Center from %s ...", url)
+		if err := downloadBinary(url, dest); err != nil {
+			logging.Warn("download failed: %v", err)
+			lastErr = err
+			continue
+		}
+		logging.Success("Alfa Center downloaded to %s", dest)
+		return dest, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no download URLs tried")
+	}
+	return "", fmt.Errorf("could not download Alfa Center: %w", lastErr)
+}
+
+func downloadBinary(url, dest string) error {
+	client := &http.Client{Timeout: 5 * time.Minute}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "alfaos-center-install")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	tmp := dest + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(f, resp.Body)
+	closeErr := f.Close()
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
+	}
+	if n < minBinaryBytes {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("file too small (%d bytes) — not a binary", n)
+	}
+	if !isELF(tmp) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("downloaded file is not an ELF binary")
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	_ = os.Chmod(dest, 0755)
+	return nil
+}
+
+func isELF(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return false
+	}
+	return magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F'
 }
 
 func findAlfaCenterCrate() string {

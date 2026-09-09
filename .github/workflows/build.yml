@@ -40,6 +40,23 @@ jobs:
             go build -ldflags="${LDFLAGS}" -o dist/alfaos-linux-arm64 ./cmd/alfaos/
           sha256sum dist/alfaos-linux-* > dist/SHA256SUMS
           cp dist/alfaos-linux-* dist/SHA256SUMS page/
+
+          # Alfa Center guest UI (prebuilt in repo, or rebuild if cargo available)
+          if [ -f guest/alfa-center/dist/alfa-center ]; then
+            cp guest/alfa-center/dist/alfa-center dist/alfa-center
+          elif command -v cargo >/dev/null 2>&1; then
+            (cd guest/alfa-center && cargo build --release)
+            cp guest/alfa-center/target/release/alfa-center dist/alfa-center
+          else
+            echo "WARNING: alfa-center binary missing from checkout" >&2
+          fi
+          if [ -f dist/alfa-center ]; then
+            chmod +x dist/alfa-center
+            cp dist/alfa-center page/alfa-center
+            sha256sum dist/alfa-center >> dist/SHA256SUMS
+            cp dist/SHA256SUMS page/SHA256SUMS
+          fi
+
           printf '%s\n' '<!DOCTYPE html><html><body>ALFAOS prebuilt binaries</body></html>' > page/index.html
           ls -lh dist/
 
