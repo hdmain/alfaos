@@ -12,6 +12,7 @@ import (
 	"github.com/alfaos/alfaos/internal/guestsetup"
 	"github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
+	"github.com/alfaos/alfaos/internal/centerapi"
 	"github.com/alfaos/alfaos/internal/networking"
 	"github.com/alfaos/alfaos/internal/rdp"
 	"github.com/alfaos/alfaos/internal/verification"
@@ -203,6 +204,10 @@ func (i *Installer) Run(force bool) error {
 		if err := networking.ExposeRDP(i.cfg, vmIP); err != nil {
 			logging.Warn("RDP port forward: %v", err)
 		}
+	}
+
+	if err := centerapi.InstallService(i.cfg); err != nil {
+		logging.Warn("Alfa Center API: %v", err)
 	}
 
 	// Step 12: Verification

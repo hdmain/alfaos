@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/alfaos/alfaos/internal/backup"
+	"github.com/alfaos/alfaos/internal/centerapi"
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/connect"
+	"github.com/alfaos/alfaos/internal/guestsetup"
 	"github.com/alfaos/alfaos/internal/install"
 	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/networking"
@@ -74,6 +76,25 @@ func main() {
 		RunE:   runRDPProxy,
 	}
 	rdpProxyCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
+
+	centerAPICmd := &cobra.Command{
+		Use:    "center-api",
+		Short:  "Run Alfa Center host API (guest settings UI backend)",
+		Hidden: true,
+		RunE:   runCenterAPI,
+	}
+	centerAPICmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
+
+	centerInstallCmd := &cobra.Command{
+		Use:   "center-install",
+		Short: "Install/refresh Alfa Center in the VM and start the host API",
+		Long: `Installs the Alfa Center GUI on the guest desktop and enables the host
+HTTP API (libvirt gateway) that Alfa Center talks to.
+
+Requires a running VM. Rebuilds the Rust binary on Linux hosts when cargo is available.`,
+		RunE: runCenterInstall,
+	}
+	centerInstallCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
 
 	startCmd := vmCommand("start", "Start the ALFAOS VM", func(vm *virtualization.Manager) error {
 		return vm.StartVM()
@@ -166,7 +187,7 @@ Example:
 		},
 	}
 
-	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, onioningCmd, exportCmd, importCmd, versionCmd)
+	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, centerAPICmd, centerInstallCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, onioningCmd, exportCmd, importCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -345,6 +366,55 @@ func runRDPProxy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return power.Run(cfg)
+}
+
+func runCenterAPI(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("alfaos center-api must be run as root")
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	cfgPath := config.ResolvePath(cfgFile)
+	return centerapi.Run(cfg, cfgPath)
+}
+
+func runCenterInstall(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("alfaos center-install must be run as root: sudo alfaos center-install")
+	}
+	if err := virtualization.EnsureLibvirtAccess(); err != nil {
+		return err
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	vm := virtualization.New(cfg)
+	if !vm.DomainExists() {
+		return fmt.Errorf("VM %q does not exist — run: sudo alfaos install", cfg.VM.Name)
+	}
+	if !vm.DomainRunning() {
+		if err := vm.StartVM(); err != nil {
+			return err
+		}
+	}
+	vmIP, err := vm.GetVMIP(3 * time.Minute)
+	if err != nil {
+		return err
+	}
+	if err := vm.WaitForSSH(vmIP, 3*time.Minute); err != nil {
+		return err
+	}
+	if err := centerapi.InstallService(cfg); err != nil {
+		return err
+	}
+	if err := guestsetup.InstallAlfaCenter(cfg, vm, vmIP); err != nil {
+		return err
+	}
+	fmt.Printf("Alfa Center ready — open it from the VM desktop (API %s)\n", centerapi.APIURLForGuest(cfg))
+	return nil
 }
 
 func runExposeRDP(cmd *cobra.Command, args []string) error {

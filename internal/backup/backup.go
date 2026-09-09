@@ -16,6 +16,7 @@ import (
 
 	"github.com/klauspost/pgzip"
 
+	"github.com/alfaos/alfaos/internal/centerapi"
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
@@ -237,6 +238,10 @@ func Import(cfgPath, archive string, force bool) error {
 		if err := networking.ExposeRDP(cfg, ""); err != nil {
 			logging.Warn("RDP proxy: %v", err)
 		}
+	}
+
+	if err := centerapi.InstallService(cfg); err != nil {
+		logging.Warn("Alfa Center API: %v", err)
 	}
 
 	logging.Success("Imported VM %q — start with: sudo alfaos start", cfg.VM.Name)

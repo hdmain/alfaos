@@ -212,9 +212,31 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 | `alfaos reboot` | Reboot (or start if stopped) |
 | `alfaos passwd` | Change VM user password (config + guest) |
 | `alfaos onioning` | Route VM internet via Tor (`on` / `off` / `stable` / `status`) |
+| `alfaos center-install` | Install/refresh Alfa Center GUI in the VM + host API |
 | `alfaos export` | Backup config + VM disk to `.tar.gz` |
 | `alfaos import` | Restore from `.tar.gz` (`--force` replaces existing VM) |
 | `alfaos version` | Print version |
+
+### Alfa Center (guest GUI)
+
+**Alfa Center** is a black egui settings app on the VM desktop. It talks to a host HTTP API (`alfaos center-api` on the libvirt gateway, port `7391`) with a shared token.
+
+| Tab | What it does |
+|-----|----------------|
+| Connection | RDP quality presets (1280×720 … 2560×1440) |
+| Privacy | Onioning on/off + stable exit IP |
+| Power | Idle shutdown minutes + wake-on-RDP |
+| Password | Change password (requires current password) |
+| Status | Live host/VM state |
+
+Installed automatically during `alfaos install` (icon on Desktop). On an existing VM:
+
+```bash
+# on Linux host (needs Rust only if dist binary missing)
+./scripts/build-alfa-center.sh
+sudo alfaos center-install
+```
+
 
 ## Desktop slimming
 
@@ -228,6 +250,7 @@ Dark GTK terminal with tabs and splits, matched to Arc-Dark. Set `alfaos.termina
 
 | Program | Package | Purpose |
 |---------|---------|---------|
+| **Alfa Center** | (bundled) | Settings UI — quality, password, Tor, power |
 | Firefox | `firefox-esr` | Web browser |
 | Notepad | `mousepad` | Text editor |
 | Calculator | `galculator` | Calculator |

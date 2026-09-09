@@ -350,6 +350,11 @@ func flushOnionRules(bridge string) {
 	_, _ = hostpkg.RunCommand("ip6tables", "-D", "FORWARD", "-o", bridge, "-j", "DROP")
 }
 
+// LibvirtBridge returns the bridge interface for a libvirt network (e.g. virbr0).
+func LibvirtBridge(network string) string {
+	return libvirtBridge(network)
+}
+
 func libvirtBridge(network string) string {
 	out, err := hostpkg.RunCommand("virsh", "net-info", network)
 	if err == nil {
@@ -364,6 +369,11 @@ func libvirtBridge(network string) string {
 		}
 	}
 	return "virbr0"
+}
+
+// LibvirtGateway returns the IPv4 gateway of a libvirt network (e.g. 192.168.122.1).
+func LibvirtGateway(network, bridge string) string {
+	return libvirtGateway(network, bridge)
 }
 
 func libvirtGateway(network, bridge string) string {

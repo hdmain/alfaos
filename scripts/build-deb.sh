@@ -42,6 +42,16 @@ install -m 644 debian/alfaos.desktop "$STAGE/usr/share/applications/alfaos.deskt
 install -m 644 debian/copyright "$STAGE/usr/share/doc/alfaos/copyright"
 gzip -9 -c debian/changelog > "$STAGE/usr/share/doc/alfaos/changelog.gz"
 
+# Guest UI binary (copied into the VM during install)
+mkdir -p "$STAGE/usr/share/alfaos"
+if [ -f guest/alfa-center/dist/alfa-center ]; then
+  install -m 755 guest/alfa-center/dist/alfa-center "$STAGE/usr/share/alfaos/alfa-center"
+elif [ -f guest/alfa-center/target/release/alfa-center ]; then
+  install -m 755 guest/alfa-center/target/release/alfa-center "$STAGE/usr/share/alfaos/alfa-center"
+else
+  echo "WARNING: Alfa Center binary missing — run scripts/build-alfa-center.sh" >&2
+fi
+
 for script in postinst prerm; do
     install -m 755 "debian/$script" "$STAGE/DEBIAN/$script"
 done

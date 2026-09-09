@@ -1,6 +1,8 @@
 build/
 *.deb
-dist/
+/dist/
+!guest/alfa-center/dist/
+!guest/alfa-center/dist/**
 /alfa1.jpeg
 /alfa2.jpeg
 /alfaos3.png
