@@ -428,11 +428,9 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 	if err := guestsetup.InstallAlfaCenter(cfg, vm, vmIP); err != nil {
 		return err
 	}
-	if err := vm.TunePerformance(); err != nil {
-		logging.Warn("KVM tune: %v", err)
-	}
 	fmt.Printf("Alfa Center ready — open it from the VM desktop (API %s)\n", centerapi.APIURLForGuest(cfg))
 	fmt.Println("Tip: in Alfa Center pick Slow link, Apply, then reconnect RDP once")
+	fmt.Println("Tip: run sudo alfaos tune only when you want to re-apply KVM performance options")
 	return nil
 }
 

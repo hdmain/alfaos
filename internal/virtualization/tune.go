@@ -2,6 +2,10 @@ package virtualization
 
 import (
 	"fmt"
+	"os"
+	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/alfaos/alfaos/internal/host"
@@ -30,87 +34,87 @@ func (m *Manager) TunePerformance() error {
 			_ = m.StopVM()
 		}
 	}
+	// Ensure fully off before XML edits
+	if m.DomainRunning() {
+		_ = m.StopVM()
+	}
 
-	steps := []struct {
+	xml, _ := m.runVirsh("dumpxml", name)
+	hostCPUs := hostCPUCount()
+
+	// Cap vCPUs to what this cloud host can actually run (avoids KVM SMP warnings / failures).
+	if hostCPUs > 0 {
+		want := m.cfg.VM.CPU
+		if want < 1 {
+			want = 2
+		}
+		if want > hostCPUs {
+			logging.Warn("Host has %d CPU(s) — capping VM from %d to %d vCPUs", hostCPUs, want, hostCPUs)
+			want = hostCPUs
+			m.cfg.VM.CPU = want
+		}
+		if out, err := host.RunCommand("virt-xml", name, "--edit", "--vcpus", strconv.Itoa(want)); err != nil {
+			logging.Warn("  vcpus: %v", summarizeVirtXML(out, err))
+		} else {
+			logging.Success("  vCPUs = %d", want)
+		}
+	}
+
+	edits := []struct {
 		desc string
 		args []string
 	}{
-		{
-			"CPU host-passthrough",
-			[]string{name, "--edit", "--cpu", "host-passthrough,cache.mode=passthrough"},
-		},
-		{
-			"disk writeback + threads + discard",
-			[]string{name, "--edit", "--disk", "target=vda,cache=writeback,io=threads,discard=unmap"},
-		},
-		{
-			"virtio memballoon",
-			[]string{name, "--edit", "--memballoon", "model=virtio"},
-		},
-		{
-			"virtio-scsi controller (if needed)",
-			[]string{name, "--add-device", "--controller", "scsi,model=virtio-scsi"},
-		},
-		{
-			"virtio RNG",
-			[]string{name, "--add-device", "--rng", "/dev/urandom,model=virtio"},
-		},
-		{
-			"qemu guest agent channel",
-			[]string{name, "--add-device", "--channel", "unix,target_type=virtio,name=org.qemu.guest_agent.0"},
-		},
+		{"CPU host-passthrough", []string{name, "--edit", "--cpu", "host-passthrough,cache.mode=passthrough"}},
+		{"disk writeback + threads + discard", []string{name, "--edit", "--disk", "target=vda,cache=writeback,io=threads,discard=unmap"}},
+		{"virtio memballoon", []string{name, "--edit", "--memballoon", "model=virtio"}},
+		{"virtio-net multi-queue", []string{name, "--edit", "--network", fmt.Sprintf("driver.queues=%d", max(1, m.cfg.VM.CPU))}},
+		{"clock utc", []string{name, "--edit", "--clock", "offset=utc"}},
 	}
-
-	cpus := m.cfg.VM.CPU
-	if cpus < 1 {
-		cpus = 2
-	}
-	steps = append(steps, struct {
-		desc string
-		args []string
-	}{
-		"virtio-net multi-queue",
-		[]string{name, "--edit", "--network", fmt.Sprintf("type=network,driver.queues=%d", cpus)},
-	})
-
-	for _, s := range steps {
+	for _, s := range edits {
 		out, err := host.RunCommand("virt-xml", s.args...)
 		if err != nil {
-			// Many "add-device" calls fail when the device already exists — OK.
-			msg := strings.ToLower(out + err.Error())
-			if strings.Contains(msg, "already") ||
-				strings.Contains(msg, "exists") ||
-				strings.Contains(msg, "duplicate") ||
-				strings.Contains(msg, "no such") {
-				logging.Info("  skip %s (%v)", s.desc, summarizeVirtXML(out, err))
-				continue
-			}
 			logging.Warn("  %s: %v", s.desc, summarizeVirtXML(out, err))
 			continue
 		}
 		logging.Success("  %s", s.desc)
 	}
 
-	// Host timers: catch-up RTC helps when host is busy
-	if out, err := host.RunCommand("virt-xml", name, "--edit", "--clock", "offset=utc"); err != nil {
-		logging.Warn("  clock: %v", summarizeVirtXML(out, err))
-	}
-	for _, t := range []string{
-		"name=rtc,tickpolicy=catchup",
-		"name=pit,tickpolicy=delay",
-		"name=hpet,present=no",
-	} {
-		if out, err := host.RunCommand("virt-xml", name, "--edit", "--timer", t); err != nil {
-			logging.Warn("  timer %s: %v", t, summarizeVirtXML(out, err))
+	// Add-only devices — skip when already present in domain XML.
+	if !strings.Contains(xml, "virtio-scsi") && !strings.Contains(xml, "model='virtio-scsi'") {
+		if out, err := host.RunCommand("virt-xml", name, "--add-device", "--controller", "scsi,model=virtio-scsi"); err != nil {
+			logging.Warn("  virtio-scsi: %v", summarizeVirtXML(out, err))
+		} else {
+			logging.Success("  virtio-scsi controller")
 		}
+	} else {
+		logging.Info("  skip virtio-scsi (already present)")
 	}
-	logging.Success("  KVM clock timers")
 
+	if !strings.Contains(xml, "rng") && !strings.Contains(xml, "virtio-rng") {
+		if out, err := host.RunCommand("virt-xml", name, "--add-device", "--rng", "/dev/urandom,model=virtio"); err != nil {
+			logging.Warn("  virtio RNG: %v", summarizeVirtXML(out, err))
+		} else {
+			logging.Success("  virtio RNG")
+		}
+	} else {
+		logging.Info("  skip virtio RNG (already present)")
+	}
+
+	// Guest agent: keep exactly one channel. Previous tune could add duplicates and break start.
+	if err := m.ensureSingleGuestAgentChannel(); err != nil {
+		logging.Warn("  guest agent channel: %v", err)
+	} else {
+		logging.Success("  qemu guest agent channel (single)")
+	}
 
 	if wasRunning {
 		logging.Info("Starting VM after tune...")
 		if err := m.StartVM(); err != nil {
-			return fmt.Errorf("start after tune: %w", err)
+			// One more repair pass for duplicate channel, then retry.
+			_ = m.ensureSingleGuestAgentChannel()
+			if err2 := m.StartVM(); err2 != nil {
+				return fmt.Errorf("start after tune: %w", err2)
+			}
 		}
 	}
 
@@ -118,13 +122,98 @@ func (m *Manager) TunePerformance() error {
 	return nil
 }
 
+// ensureSingleGuestAgentChannel removes duplicate org.qemu.guest_agent.0 channels
+// and adds one if missing.
+func (m *Manager) ensureSingleGuestAgentChannel() error {
+	name := m.cfg.VM.Name
+	xml, err := m.runVirsh("dumpxml", name)
+	if err != nil {
+		return err
+	}
+
+	const marker = "org.qemu.guest_agent.0"
+	count := strings.Count(xml, marker)
+	if count == 1 {
+		return nil
+	}
+
+	if count > 1 {
+		logging.Warn("Removing %d duplicate guest-agent channels...", count-1)
+		cleaned := removeDuplicateGuestAgentChannels(xml)
+		tmp, err := os.CreateTemp("", "alfaos-domain-*.xml")
+		if err != nil {
+			return err
+		}
+		path := tmp.Name()
+		if _, err := tmp.WriteString(cleaned); err != nil {
+			tmp.Close()
+			_ = os.Remove(path)
+			return err
+		}
+		tmp.Close()
+		defer os.Remove(path)
+		if _, err := m.runVirsh("define", path); err != nil {
+			return fmt.Errorf("redefine after channel cleanup: %w", err)
+		}
+		xml = cleaned
+		count = strings.Count(xml, marker)
+	}
+
+	if count == 0 {
+		out, err := host.RunCommand("virt-xml", name, "--add-device", "--channel",
+			"unix,target_type=virtio,name=org.qemu.guest_agent.0")
+		if err != nil {
+			return fmt.Errorf("add guest agent: %v", summarizeVirtXML(out, err))
+		}
+	}
+	return nil
+}
+
+// removeDuplicateGuestAgentChannels keeps the first <channel>…guest_agent…</channel> block.
+func removeDuplicateGuestAgentChannels(xml string) string {
+	re := regexp.MustCompile(`(?s)<channel[^>]*>.*?org\.qemu\.guest_agent\.0.*?</channel>\s*`)
+	matches := re.FindAllString(xml, -1)
+	if len(matches) <= 1 {
+		return xml
+	}
+	// Remove all, then re-insert the first once at the first match position.
+	first := matches[0]
+	without := re.ReplaceAllString(xml, "")
+	// Prefer putting it back near other channels / devices.
+	if i := strings.Index(without, "</devices>"); i >= 0 {
+		return without[:i] + first + without[i:]
+	}
+	return without + first
+}
+
+func hostCPUCount() int {
+	// Prefer online CPU count from sysfs / nproc.
+	if out, err := host.RunCommand("nproc"); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(out)); err == nil && n > 0 {
+			return n
+		}
+	}
+	n := runtime.NumCPU()
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func summarizeVirtXML(out string, err error) string {
 	s := strings.TrimSpace(out)
 	if s == "" && err != nil {
 		return err.Error()
 	}
-	if len(s) > 160 {
-		s = s[:160] + "…"
+	if len(s) > 200 {
+		s = s[:200] + "…"
 	}
 	if err != nil && s != "" {
 		return fmt.Sprintf("%v (%s)", err, s)
