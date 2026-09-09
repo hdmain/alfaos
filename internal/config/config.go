@@ -105,7 +105,7 @@ func Default() *Config {
 	c.RDP.Port = 3389
 	c.RDP.Width = 1920
 	c.RDP.Height = 1080
-	c.RDP.Quality = "high"
+	c.RDP.Quality = "low" // default for remote/VPS use — better on slow links
 	c.RDP.Expose = true
 	c.RDP.BindHost = "0.0.0.0"
 

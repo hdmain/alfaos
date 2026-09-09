@@ -96,6 +96,21 @@ Requires a running VM. Rebuilds the Rust binary on Linux hosts when cargo is ava
 	}
 	centerInstallCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
 
+	tuneCmd := &cobra.Command{
+		Use:   "tune",
+		Short: "Apply KVM performance tuning (CPU passthrough, faster disk I/O)",
+		Long: `Retunes the ALFAOS libvirt domain for snappier RDP:
+
+  • CPU host-passthrough
+  • disk cache=writeback, io=threads, discard=unmap
+  • virtio balloon, RNG, guest-agent channel
+  • virtio-net multi-queue
+
+Briefly shuts down and restarts the VM if it is running.`,
+		RunE: runTune,
+	}
+	tuneCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
+
 	startCmd := vmCommand("start", "Start the ALFAOS VM", func(vm *virtualization.Manager) error {
 		return vm.StartVM()
 	})
@@ -187,7 +202,7 @@ Example:
 		},
 	}
 
-	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, centerAPICmd, centerInstallCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, onioningCmd, exportCmd, importCmd, versionCmd)
+	rootCmd.AddCommand(installCmd, connectCmd, exposeCmd, rdpProxyCmd, centerAPICmd, centerInstallCmd, tuneCmd, startCmd, shutdownCmd, rebootCmd, passwdCmd, onioningCmd, exportCmd, importCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -413,8 +428,26 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 	if err := guestsetup.InstallAlfaCenter(cfg, vm, vmIP); err != nil {
 		return err
 	}
+	if err := vm.TunePerformance(); err != nil {
+		logging.Warn("KVM tune: %v", err)
+	}
 	fmt.Printf("Alfa Center ready — open it from the VM desktop (API %s)\n", centerapi.APIURLForGuest(cfg))
+	fmt.Println("Tip: in Alfa Center pick Slow link, Apply, then reconnect RDP once")
 	return nil
+}
+
+func runTune(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("alfaos tune must be run as root: sudo alfaos tune")
+	}
+	if err := virtualization.EnsureLibvirtAccess(); err != nil {
+		return err
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	return virtualization.New(cfg).TunePerformance()
 }
 
 func runExposeRDP(cmd *cobra.Command, args []string) error {

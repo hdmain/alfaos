@@ -213,6 +213,7 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 | `alfaos passwd` | Change VM user password (config + guest) |
 | `alfaos onioning` | Route VM internet via Tor (`on` / `off` / `stable` / `status`) |
 | `alfaos center-install` | Install/refresh Alfa Center GUI in the VM + host API |
+| `alfaos tune` | KVM performance tune (CPU passthrough, faster disk I/O) |
 | `alfaos export` | Backup config + VM disk to `.tar.gz` |
 | `alfaos import` | Restore from `.tar.gz` (`--force` replaces existing VM) |
 | `alfaos version` | Print version |
@@ -223,7 +224,7 @@ These commands use libvirt (`qemu:///system`). If your user is not in the `libvi
 
 | Tab | What it does |
 |-----|----------------|
-| Connection | RDP quality presets (1280×720 … 2560×1440) |
+| Connection | Link profile: Slow / Balanced / LAN / Max (compression + bpp; Display may stay the same) |
 | Privacy | Onioning on/off + stable exit IP |
 | Power | Idle shutdown minutes + wake-on-RDP |
 | Password | Change password (requires current password) |

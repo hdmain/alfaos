@@ -102,8 +102,8 @@ fi
 sudo sed -i 's/^drdynvc=.*/drdynvc=true/' /etc/xrdp/xrdp.ini 2>/dev/null || true
 grep -q '^drdynvc=' /etc/xrdp/xrdp.ini 2>/dev/null || sudo sed -i '/^\[Globals\]/a drdynvc=true' /etc/xrdp/xrdp.ini
 
-# Low-latency LAN tuning
-for kv in tcp_nodelay=true tcp_keepalive=true bulk_compression=true new_cursors=true; do
+# Low-latency + compression defaults (profiles refine these later)
+for kv in tcp_nodelay=true tcp_keepalive=true bulk_compression=true new_cursors=true use_fastpath=both bitmap_cache=true bitmap_compression=true max_bpp=24 crypt_level=medium; do
   key="${kv%%=*}"
   val="${kv#*=}"
   if grep -q "^${key}=" /etc/xrdp/xrdp.ini 2>/dev/null; then

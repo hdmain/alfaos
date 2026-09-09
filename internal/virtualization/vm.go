@@ -145,14 +145,21 @@ func (m *Manager) CreateVM(isoPath, preseedPath string) error {
 		m.cfg.ALFAOS.Hostname,
 	)
 
-	// VirtIO disk (/dev/vda) + VirtIO NIC — much faster than IDE in the guest.
+	// VirtIO disk/NIC + host CPU + writeback cache — snappier guest for RDP.
 	args := []string{
 		"--name", m.cfg.VM.Name,
 		"--machine", "pc-i440fx-8.2",
 		"--ram", fmt.Sprintf("%d", m.cfg.VM.RAM),
 		"--vcpus", fmt.Sprintf("%d", m.cfg.VM.CPU),
-		"--disk", fmt.Sprintf("path=%s,size=%d,format=qcow2,bus=virtio", diskPath, m.cfg.VM.Disk),
+		"--cpu", "host-passthrough,cache.mode=passthrough",
+		"--disk", fmt.Sprintf(
+			"path=%s,size=%d,format=qcow2,bus=virtio,cache=writeback,io=threads,discard=unmap",
+			diskPath, m.cfg.VM.Disk,
+		),
 		"--network", fmt.Sprintf("network=%s,model=virtio", m.cfg.VM.Network),
+		"--memballoon", "virtio",
+		"--rng", "/dev/urandom",
+		"--channel", "unix,target_type=virtio,name=org.qemu.guest_agent.0",
 		"--graphics", m.cfg.VM.Graphics,
 		"--console", "pty,target_type=serial",
 		"--location", location,

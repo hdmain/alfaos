@@ -251,15 +251,14 @@ impl AlfaCenterApp {
     fn ui_connection(&mut self, ui: &mut egui::Ui) {
         Self::section_title(
             ui,
-            "Connection quality",
-            "Changes THIS desktop resolution (what Display settings show) + RDP color depth.",
+            "Connection profile",
+            "Optimizes RDP for your link speed (color depth, compression, lighter desktop). Display resolution can stay the same.",
         );
 
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!("Live display now: {}", self.live_resolution))
-                    .color(Color32::from_rgb(180, 180, 100))
-                    .strong(),
+                RichText::new(format!("Display now: {}", self.live_resolution))
+                    .color(Color32::from_rgb(140, 140, 140)),
             );
             if ui.small_button("↻").clicked() {
                 self.refresh_live_resolution();
@@ -267,42 +266,42 @@ impl AlfaCenterApp {
         });
         ui.add_space(8.0);
 
-        egui::ComboBox::from_label("Preset")
+        egui::ComboBox::from_label("Profile")
             .selected_text(match self.quality.as_str() {
-                "low" => "Low — 1280×720, 16-bit (least lag)",
-                "medium" => "Medium — 1600×900, 24-bit",
-                "high" => "High — 1920×1080, 32-bit",
-                "ultra" => "Ultra — 2560×1440, 32-bit",
+                "low" => "Slow link — 16-bit + max compression + light desktop",
+                "medium" => "Balanced — 24-bit + compression",
+                "high" => "LAN / fast — 32-bit",
+                "ultra" => "Max quality — 32-bit, light compression",
                 other => other,
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(
                     &mut self.quality,
                     "low".into(),
-                    "Low — 1280×720, 16-bit (least lag)",
+                    "Slow link — 16-bit + max compression + light desktop",
                 );
                 ui.selectable_value(
                     &mut self.quality,
                     "medium".into(),
-                    "Medium — 1600×900, 24-bit",
+                    "Balanced — 24-bit + compression",
                 );
                 ui.selectable_value(
                     &mut self.quality,
                     "high".into(),
-                    "High — 1920×1080, 32-bit",
+                    "LAN / fast — 32-bit",
                 );
                 ui.selectable_value(
                     &mut self.quality,
                     "ultra".into(),
-                    "Ultra — 2560×1440, 32-bit",
+                    "Max quality — 32-bit, light compression",
                 );
             });
 
         ui.add_space(16.0);
         if ui
             .add_sized(
-                [240.0, 36.0],
-                egui::Button::new(RichText::new("Apply quality now").strong())
+                [260.0, 36.0],
+                egui::Button::new(RichText::new("Apply profile").strong())
                     .fill(Color32::from_rgb(140, 20, 30))
                     .rounding(Rounding::same(4.0)),
             )
@@ -311,29 +310,22 @@ impl AlfaCenterApp {
             self.busy = true;
             let q = self.quality.clone();
             match quality_geometry(&q) {
-                None => self.set_err("Unknown quality preset"),
-                Some((w, h, bpp)) => {
-                    // 1) Change the live X session from inside Alfa Center (has DISPLAY)
-                    match apply_local(&q, w, h, bpp) {
-                        Ok(local_msg) => {
-                            self.refresh_live_resolution();
-                            // 2) Persist on host + xrdp bpp via API
-                            match self.api.set_quality(&q) {
-                                Ok(api_msg) => {
-                                    self.set_ok(format!("{local_msg} | {api_msg}"));
-                                    self.refresh();
-                                    self.refresh_live_resolution();
-                                }
-                                Err(e) => {
-                                    self.set_ok(format!(
-                                        "{local_msg} | host API warn: {e} (display already changed)"
-                                    ));
-                                }
+                None => self.set_err("Unknown profile"),
+                Some((w, h, bpp)) => match apply_local(&q, w, h, bpp) {
+                    Ok(local_msg) => {
+                        self.refresh_live_resolution();
+                        match self.api.set_quality(&q) {
+                            Ok(api_msg) => {
+                                self.set_ok(format!("{local_msg} | {api_msg}"));
+                                self.refresh();
                             }
+                            Err(e) => self.set_ok(format!(
+                                "{local_msg} | host API warn: {e} (guest profile already applied)"
+                            )),
                         }
-                        Err(e) => self.set_err(e),
                     }
-                }
+                    Err(e) => self.set_err(e),
+                },
             }
             self.busy = false;
         }
@@ -341,8 +333,8 @@ impl AlfaCenterApp {
         ui.add_space(10.0);
         ui.label(
             RichText::new(
-                "Tip: if your RDP client is fullscreen on a 1920×1080 monitor, it may jump back.\n\
-                 Use a windowed RDP session, or reconnect after Apply.",
+                "After Apply: disconnect RDP once and reconnect.\n\
+                 On a slow connection pick Slow link — it uses less bandwidth even if Display stays 1920×1080.",
             )
             .color(Color32::from_rgb(120, 120, 120))
             .size(12.0),

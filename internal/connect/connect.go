@@ -29,14 +29,14 @@ func Run(cfg *config.Config) error {
 	}
 
 	for _, client := range []struct {
-		bin  string
-		run  func(string) *exec.Cmd
+		bin string
+		run func(string) *exec.Cmd
 	}{
 		{"xfreerdp", func(b string) *exec.Cmd {
-			return exec.Command(b, xfreerdpArgs(ip, user, pass, res)...)
+			return exec.Command(b, xfreerdpArgs(cfg, ip, user, pass, res)...)
 		}},
 		{"xfreerdp3", func(b string) *exec.Cmd {
-			return exec.Command(b, xfreerdpArgs(ip, user, pass, res)...)
+			return exec.Command(b, xfreerdpArgs(cfg, ip, user, pass, res)...)
 		}},
 	} {
 		if _, err := exec.LookPath(client.bin); err == nil {
@@ -49,13 +49,14 @@ func Run(cfg *config.Config) error {
 	}
 
 	if _, err := exec.LookPath("rdesktop"); err == nil {
+		exp := rdesktopExperience(cfg)
 		cmd := exec.Command("rdesktop",
 			"-g", res,
 			"-u", user,
 			"-p", pass,
 			"-r", "clipboard:off",
-			"-a", "16",
-			"-x", "lan",
+			"-a", fmt.Sprintf("%d", rdpBPP(cfg)),
+			"-x", exp,
 			ip,
 		)
 		cmd.Stdin = os.Stdin
@@ -67,20 +68,57 @@ func Run(cfg *config.Config) error {
 	return fmt.Errorf("no RDP client found — install: sudo apt install freerdp3-x11")
 }
 
-// xfreerdpArgs returns low-latency flags for LAN/homelab use.
-func xfreerdpArgs(ip, user, pass, res string) []string {
-	return []string{
+// xfreerdpArgs picks compression/network profile from rdp.quality (slow link friendly).
+func xfreerdpArgs(cfg *config.Config, ip, user, pass, res string) []string {
+	net, compress, bpp := freerdpProfile(cfg)
+	args := []string{
 		"/v:" + ip,
 		"/u:" + user,
 		"/p:" + pass,
 		"/size:" + res,
 		"/cert:ignore",
 		"+clipboard",
-		"/network:lan",
-		"/gfx",
-		"/rfx",
-		"/compression-level:2",
+		"/network:" + net,
+		"/bpp:" + fmt.Sprintf("%d", bpp),
+		"/compression-level:" + compress,
 		"/sound:off",
+	}
+	q := strings.ToLower(cfg.RDP.Quality)
+	if q == "low" || q == "slow" || q == "medium" || q == "balanced" {
+		// Cut visual chrome on slow/wan links (less bandwidth)
+		args = append(args, "-wallpaper", "-themes", "-menu-anims", "-window-drag", "-gfx")
+	} else {
+		args = append(args, "/gfx", "/rfx")
+	}
+	return args
+}
+
+func freerdpProfile(cfg *config.Config) (network, compressLevel string, bpp int) {
+	switch strings.ToLower(strings.TrimSpace(cfg.RDP.Quality)) {
+	case "low", "slow":
+		return "modem", "2", 16
+	case "medium", "balanced":
+		return "wan", "1", 24
+	case "ultra", "max":
+		return "lan", "0", 32
+	default:
+		return "lan", "1", 32
+	}
+}
+
+func rdpBPP(cfg *config.Config) int {
+	_, _, bpp := freerdpProfile(cfg)
+	return bpp
+}
+
+func rdesktopExperience(cfg *config.Config) string {
+	switch strings.ToLower(cfg.RDP.Quality) {
+	case "low", "slow":
+		return "modem"
+	case "medium", "balanced":
+		return "broadband"
+	default:
+		return "lan"
 	}
 }
 

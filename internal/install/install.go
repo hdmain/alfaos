@@ -210,6 +210,10 @@ func (i *Installer) Run(force bool) error {
 		logging.Warn("Alfa Center API: %v", err)
 	}
 
+	if err := i.vm.TunePerformance(); err != nil {
+		logging.Warn("KVM tune: %v", err)
+	}
+
 	// Step 12: Verification
 	logging.Step(12, totalSteps, "Running verification tests")
 	verifier := verification.New(i.cfg, i.vm, vmIP)

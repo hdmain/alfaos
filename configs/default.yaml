@@ -28,7 +28,7 @@ rdp:
   port: 3389
   width: 1920
   height: 1080
-  quality: high     # low | medium | high | ultra (resolution + color depth)
+  quality: low      # slow|low = weak internet; medium = balanced; high = LAN; ultra = max
   expose: true       # forward 0.0.0.0:3389 on host → VM (for VPS remote RDP)
   bind_host: "0.0.0.0"
 
