@@ -1,11 +1,13 @@
 mod api;
 mod config;
+mod display;
 
 use eframe::egui::{self, Color32, RichText, Rounding, Stroke, Vec2};
 use egui::{Frame, Margin};
 
 use crate::api::{ApiClient, Status};
 use crate::config::CenterConfig;
+use crate::display::{apply_local, current_resolution, quality_geometry};
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -60,6 +62,7 @@ struct AlfaCenterApp {
     message: String,
     error: String,
     busy: bool,
+    live_resolution: String,
 }
 
 #[derive(PartialEq)]
@@ -91,9 +94,14 @@ impl AlfaCenterApp {
             message: String::new(),
             error: String::new(),
             busy: false,
+            live_resolution: current_resolution().unwrap_or_else(|_| "?".into()),
         };
         app.refresh();
         app
+    }
+
+    fn refresh_live_resolution(&mut self) {
+        self.live_resolution = current_resolution().unwrap_or_else(|_| "?".into());
     }
 
     fn refresh(&mut self) {
@@ -244,8 +252,20 @@ impl AlfaCenterApp {
         Self::section_title(
             ui,
             "Connection quality",
-            "Changes resolution + color depth. After Apply: disconnect and reconnect RDP once.",
+            "Changes THIS desktop resolution (what Display settings show) + RDP color depth.",
         );
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("Live display now: {}", self.live_resolution))
+                    .color(Color32::from_rgb(180, 180, 100))
+                    .strong(),
+            );
+            if ui.small_button("↻").clicked() {
+                self.refresh_live_resolution();
+            }
+        });
+        ui.add_space(8.0);
 
         egui::ComboBox::from_label("Preset")
             .selected_text(match self.quality.as_str() {
@@ -281,23 +301,52 @@ impl AlfaCenterApp {
         ui.add_space(16.0);
         if ui
             .add_sized(
-                [200.0, 36.0],
-                egui::Button::new(RichText::new("Apply quality").strong())
+                [240.0, 36.0],
+                egui::Button::new(RichText::new("Apply quality now").strong())
                     .fill(Color32::from_rgb(140, 20, 30))
                     .rounding(Rounding::same(4.0)),
             )
             .clicked()
         {
             self.busy = true;
-            match self.api.set_quality(&self.quality) {
-                Ok(msg) => {
-                    self.set_ok(msg);
-                    self.refresh();
+            let q = self.quality.clone();
+            match quality_geometry(&q) {
+                None => self.set_err("Unknown quality preset"),
+                Some((w, h, bpp)) => {
+                    // 1) Change the live X session from inside Alfa Center (has DISPLAY)
+                    match apply_local(&q, w, h, bpp) {
+                        Ok(local_msg) => {
+                            self.refresh_live_resolution();
+                            // 2) Persist on host + xrdp bpp via API
+                            match self.api.set_quality(&q) {
+                                Ok(api_msg) => {
+                                    self.set_ok(format!("{local_msg} | {api_msg}"));
+                                    self.refresh();
+                                    self.refresh_live_resolution();
+                                }
+                                Err(e) => {
+                                    self.set_ok(format!(
+                                        "{local_msg} | host API warn: {e} (display already changed)"
+                                    ));
+                                }
+                            }
+                        }
+                        Err(e) => self.set_err(e),
+                    }
                 }
-                Err(e) => self.set_err(e),
             }
             self.busy = false;
         }
+
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new(
+                "Tip: if your RDP client is fullscreen on a 1920×1080 monitor, it may jump back.\n\
+                 Use a windowed RDP session, or reconnect after Apply.",
+            )
+            .color(Color32::from_rgb(120, 120, 120))
+            .size(12.0),
+        );
     }
 
     fn ui_privacy(&mut self, ui: &mut egui::Ui) {
