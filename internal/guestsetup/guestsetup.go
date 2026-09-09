@@ -43,7 +43,7 @@ func Install(cfg *config.Config, vm *virtualization.Manager, wall *wallpapers.Ma
 		return fmt.Errorf("guest setup failed: %w\n%s", err, out)
 	}
 
-	if err := InstallAlfaCenter(cfg, vm, ip); err != nil {
+	if err := InstallAlfaCenter(cfg, vm, ip, false); err != nil {
 		logging.Warn("Alfa Center: %v", err)
 	}
 

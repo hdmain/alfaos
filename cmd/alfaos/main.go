@@ -91,7 +91,8 @@ func main() {
 		Long: `Installs the Alfa Center GUI on the guest desktop and enables the host
 HTTP API (libvirt gateway) that Alfa Center talks to.
 
-Requires a running VM. Rebuilds the Rust binary on Linux hosts when cargo is available.`,
+Requires a running VM. Always re-downloads the latest Alfa Center binary from GitHub
+(so the guest is not stuck on an old cached copy under /var/lib/alfaos/state).`,
 		RunE: runCenterInstall,
 	}
 	centerInstallCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file")
@@ -425,7 +426,7 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 	if err := centerapi.InstallService(cfg); err != nil {
 		return err
 	}
-	if err := guestsetup.InstallAlfaCenter(cfg, vm, vmIP); err != nil {
+	if err := guestsetup.InstallAlfaCenter(cfg, vm, vmIP, true); err != nil {
 		return err
 	}
 	fmt.Printf("Alfa Center ready — open it from the VM desktop (API %s)\n", centerapi.APIURLForGuest(cfg))

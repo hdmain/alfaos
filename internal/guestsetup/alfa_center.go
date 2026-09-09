@@ -24,7 +24,9 @@ const (
 )
 
 // InstallAlfaCenter copies the Alfa Center GUI into the guest and writes API credentials.
-func InstallAlfaCenter(cfg *config.Config, vm *virtualization.Manager, ip string) error {
+// When refresh is true (alfaos center-install), always re-download from GitHub so the
+// guest is not stuck on a stale /var/lib/alfaos/state/alfa-center cache.
+func InstallAlfaCenter(cfg *config.Config, vm *virtualization.Manager, ip string, refresh bool) error {
 	logging.Info("Installing Alfa Center (guest settings UI)...")
 
 	token, err := centerapi.EnsureToken(cfg.Paths.StateDir)
@@ -33,9 +35,12 @@ func InstallAlfaCenter(cfg *config.Config, vm *virtualization.Manager, ip string
 	}
 	apiURL := centerapi.APIURLForGuest(cfg)
 
-	binLocal, err := resolveAlfaCenterBinary(cfg.Paths.StateDir)
+	binLocal, err := resolveAlfaCenterBinary(cfg.Paths.StateDir, refresh)
 	if err != nil {
 		return fmt.Errorf("Alfa Center binary: %w", err)
+	}
+	if st, err := os.Stat(binLocal); err == nil {
+		logging.Info("Binary: %s (%d bytes, mtime %s)", binLocal, st.Size(), st.ModTime().UTC().Format(time.RFC3339))
 	}
 
 	if err := vm.CopyFile(ip, binLocal, "/tmp/alfa-center"); err != nil {
@@ -52,6 +57,10 @@ func InstallAlfaCenter(cfg *config.Config, vm *virtualization.Manager, ip string
 
 	script := `#!/bin/bash
 set -euo pipefail
+# Stop any running UI so the new binary is used on next launch
+pkill -x alfa-center 2>/dev/null || true
+sleep 0.5
+
 sudo install -m 755 /tmp/alfa-center /usr/local/bin/alfa-center
 sudo mkdir -p /etc/alfaos
 sudo install -m 640 /tmp/alfaos-center.conf /etc/alfaos/center.conf
@@ -93,7 +102,10 @@ fi
 
 sudo chown -R alfaos:alfaos /home/alfaos/Desktop /home/alfaos/.local/share/applications
 sudo chown alfaos:alfaos /home/alfaos/.config/plank/dock1/launchers/alfa-center.dockitem 2>/dev/null || true
-echo "Alfa Center installed"
+
+echo "Alfa Center installed:"
+ls -la /usr/local/bin/alfa-center
+sha256sum /usr/local/bin/alfa-center | awk '{print "sha256:", $1}'
 `
 	localScript := filepath.Join(cfg.Paths.StateDir, "alfa-center-install.sh")
 	if err := os.WriteFile(localScript, []byte(script), 0755); err != nil {
@@ -107,12 +119,25 @@ echo "Alfa Center installed"
 	if err != nil {
 		return fmt.Errorf("alfa-center install: %w\n%s", err, out)
 	}
+	if strings.TrimSpace(out) != "" {
+		logging.Info("%s", strings.TrimSpace(out))
+	}
 
 	logging.Success("Alfa Center installed on guest desktop (API %s)", apiURL)
+	logging.Info("Close Alfa Center if it is open, then launch it again from the Desktop")
 	return nil
 }
 
-func resolveAlfaCenterBinary(stateDir string) (string, error) {
+func resolveAlfaCenterBinary(stateDir string, refresh bool) (string, error) {
+	if refresh {
+		logging.Info("Refreshing Alfa Center binary from GitHub...")
+		path, err := downloadAlfaCenter(stateDir)
+		if err == nil {
+			return path, nil
+		}
+		logging.Warn("Download failed (%v) — falling back to local binary", err)
+	}
+
 	if path, ok := findLocalAlfaCenter(stateDir); ok {
 		logging.Info("Using local Alfa Center binary: %s", path)
 		return path, nil
@@ -203,9 +228,10 @@ func downloadAlfaCenter(stateDir string) (string, error) {
 	}
 
 	urls := []string{
-		fmt.Sprintf("https://%s.github.io/%s/alfa-center", owner, name),
-		fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/guest/alfa-center/dist/alfa-center", repo, branch),
-		fmt.Sprintf("https://github.com/%s/raw/%s/guest/alfa-center/dist/alfa-center", repo, branch),
+		// Prefer raw main (always latest commit) — Pages can lag behind CI deploy.
+		fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/guest/alfa-center/dist/alfa-center?t=%d", repo, branch, time.Now().Unix()),
+		fmt.Sprintf("https://github.com/%s/raw/%s/guest/alfa-center/dist/alfa-center?t=%d", repo, branch, time.Now().Unix()),
+		fmt.Sprintf("https://%s.github.io/%s/alfa-center?t=%d", owner, name, time.Now().Unix()),
 	}
 
 	var lastErr error
