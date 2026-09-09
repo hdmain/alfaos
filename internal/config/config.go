@@ -46,6 +46,7 @@ type Config struct {
 		Port     int    `yaml:"port"`
 		Width    int    `yaml:"width"`
 		Height   int    `yaml:"height"`
+		Quality  string `yaml:"quality"`   // low | medium | high | ultra
 		Expose   bool   `yaml:"expose"`    // forward host port to VM (for VPS remote access)
 		BindHost string `yaml:"bind_host"` // host listen address, default 0.0.0.0
 	} `yaml:"rdp"`
@@ -104,6 +105,7 @@ func Default() *Config {
 	c.RDP.Port = 3389
 	c.RDP.Width = 1920
 	c.RDP.Height = 1080
+	c.RDP.Quality = "high"
 	c.RDP.Expose = true
 	c.RDP.BindHost = "0.0.0.0"
 
@@ -215,6 +217,16 @@ func (c *Config) RDPResolution() string {
 		h = 1080
 	}
 	return fmt.Sprintf("%dx%d", w, h)
+}
+
+// RDPQualityName returns the configured quality preset (or inferred from size).
+func (c *Config) RDPQualityName() string {
+	q := strings.ToLower(strings.TrimSpace(c.RDP.Quality))
+	switch q {
+	case "low", "medium", "high", "ultra":
+		return q
+	}
+	return ""
 }
 
 // DNSServers returns configured DNS servers or AdGuard defaults when unset.

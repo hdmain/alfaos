@@ -73,8 +73,30 @@ impl ApiClient {
             "/api/rdp/quality",
             Some(json!({ "quality": quality })),
         )?;
-        let _ = text;
-        Ok(format!("Quality set to {quality}. Reconnect RDP if the screen did not resize."))
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            let applied = v.get("applied").and_then(|x| x.as_bool()).unwrap_or(false);
+            let w = v.get("width").and_then(|x| x.as_i64()).unwrap_or(0);
+            let h = v.get("height").and_then(|x| x.as_i64()).unwrap_or(0);
+            let bpp = v.get("bpp").and_then(|x| x.as_i64()).unwrap_or(0);
+            let hint = v
+                .get("hint")
+                .and_then(|x| x.as_str())
+                .unwrap_or("Reconnect RDP if the screen did not change.");
+            if applied {
+                return Ok(format!(
+                    "Applied {quality} ({w}×{h}, {bpp}-bit). {hint}"
+                ));
+            }
+            if let Some(warn) = v.get("warning").and_then(|x| x.as_str()) {
+                return Ok(format!(
+                    "Saved {quality} ({w}×{h}). Live resize: {warn}. Disconnect + reconnect RDP now."
+                ));
+            }
+            return Ok(format!("Saved {quality} ({w}×{h}). {hint}"));
+        }
+        Ok(format!(
+            "Quality set to {quality}. Disconnect and reconnect RDP to apply fully."
+        ))
     }
 
     pub fn set_onioning(&self, enabled: bool, stable: bool) -> Result<String, String> {

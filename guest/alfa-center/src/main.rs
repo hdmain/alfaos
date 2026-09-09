@@ -244,22 +244,38 @@ impl AlfaCenterApp {
         Self::section_title(
             ui,
             "Connection quality",
-            "Lower quality = less lag over RDP. Applies on host and inside the VM.",
+            "Changes resolution + color depth. After Apply: disconnect and reconnect RDP once.",
         );
 
         egui::ComboBox::from_label("Preset")
             .selected_text(match self.quality.as_str() {
-                "low" => "Low — 1280×720 (fastest)",
-                "medium" => "Medium — 1600×900",
-                "high" => "High — 1920×1080",
-                "ultra" => "Ultra — 2560×1440",
+                "low" => "Low — 1280×720, 16-bit (least lag)",
+                "medium" => "Medium — 1600×900, 24-bit",
+                "high" => "High — 1920×1080, 32-bit",
+                "ultra" => "Ultra — 2560×1440, 32-bit",
                 other => other,
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.quality, "low".into(), "Low — 1280×720 (fastest)");
-                ui.selectable_value(&mut self.quality, "medium".into(), "Medium — 1600×900");
-                ui.selectable_value(&mut self.quality, "high".into(), "High — 1920×1080");
-                ui.selectable_value(&mut self.quality, "ultra".into(), "Ultra — 2560×1440");
+                ui.selectable_value(
+                    &mut self.quality,
+                    "low".into(),
+                    "Low — 1280×720, 16-bit (least lag)",
+                );
+                ui.selectable_value(
+                    &mut self.quality,
+                    "medium".into(),
+                    "Medium — 1600×900, 24-bit",
+                );
+                ui.selectable_value(
+                    &mut self.quality,
+                    "high".into(),
+                    "High — 1920×1080, 32-bit",
+                );
+                ui.selectable_value(
+                    &mut self.quality,
+                    "ultra".into(),
+                    "Ultra — 2560×1440, 32-bit",
+                );
             });
 
         ui.add_space(16.0);

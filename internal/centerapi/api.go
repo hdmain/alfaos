@@ -211,7 +211,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		OnioningActive: networking.OnioningActive(),
 		RDPWidth:       cfg.RDP.Width,
 		RDPHeight:      cfg.RDP.Height,
-		RDPQuality:     QualityNameFromSize(cfg.RDP.Width, cfg.RDP.Height),
+		RDPQuality:     effectiveQuality(cfg),
 		IdleMinutes:    cfg.Power.IdleShutdownMinutes,
 		WakeOnRDP:      cfg.Power.WakeOnRDP,
 		DNS:            cfg.DNSServers(),
@@ -263,14 +263,21 @@ func (s *Server) handleQuality(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiError{Error: "invalid json"})
 		return
 	}
+
+	quality := strings.ToLower(strings.TrimSpace(req.Quality))
 	wth, hgt := req.Width, req.Height
-	if req.Quality != "" {
-		pw, ph, ok := QualityPreset(req.Quality)
+	if quality != "" {
+		pw, ph, ok := QualityPreset(quality)
 		if !ok {
 			writeJSON(w, http.StatusBadRequest, apiError{Error: "quality must be low|medium|high|ultra"})
 			return
 		}
 		wth, hgt = pw, ph
+	} else {
+		quality = QualityNameFromSize(wth, hgt)
+		if quality == "custom" {
+			quality = "high"
+		}
 	}
 	if wth < 800 || hgt < 600 || wth > 3840 || hgt > 2160 {
 		writeJSON(w, http.StatusBadRequest, apiError{Error: "resolution out of range"})
@@ -284,20 +291,25 @@ func (s *Server) handleQuality(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.RDP.Width = wth
 	cfg.RDP.Height = hgt
+	cfg.RDP.Quality = quality
 	if err := config.Save(cfg, s.cfgPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
 	}
 	s.cfg = cfg
 
-	if err := applyGuestResolution(cfg, wth, hgt); err != nil {
-		logging.Warn("guest resolution update: %v", err)
+	applied, err := applyGuestQuality(cfg, quality, wth, hgt)
+	if err != nil {
+		logging.Warn("guest quality update: %v", err)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":      true,
 			"width":   wth,
 			"height":  hgt,
-			"quality": QualityNameFromSize(wth, hgt),
+			"quality": quality,
+			"bpp":     qualityBPP(quality),
+			"applied": false,
 			"warning": err.Error(),
+			"hint":    "Saved on host. Disconnect and reconnect RDP to apply.",
 		})
 		return
 	}
@@ -305,7 +317,10 @@ func (s *Server) handleQuality(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"width":   wth,
 		"height":  hgt,
-		"quality": QualityNameFromSize(wth, hgt),
+		"quality": quality,
+		"bpp":     qualityBPP(quality),
+		"applied": applied,
+		"hint":    "Resolution applied to the live session. Reconnect RDP once for color-depth (bpp) to fully update.",
 	})
 }
 
@@ -381,23 +396,173 @@ func (s *Server) handlePower(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func applyGuestResolution(cfg *config.Config, w, h int) error {
+func applyGuestQuality(cfg *config.Config, quality string, w, h int) (bool, error) {
 	vm := virtualization.New(cfg)
 	if !vm.DomainExists() || !vm.DomainRunning() {
-		return fmt.Errorf("VM not running — resolution saved for next session")
+		return false, fmt.Errorf("VM not running — quality saved for next session")
 	}
 	ip, err := vm.GetVMIP(30 * time.Second)
 	if err != nil {
-		return err
+		return false, err
 	}
-	script := fmt.Sprintf(`sudo tee /etc/alfaos/rdp-resolution >/dev/null <<EOF
+	bpp := qualityBPP(quality)
+	// Install/update the apply helper, then run it against the live Xrdp session(s).
+	script := fmt.Sprintf(`set -euo pipefail
+sudo mkdir -p /etc/alfaos /home/alfaos/.local/bin
+sudo tee /etc/alfaos/rdp-resolution >/dev/null <<EOF
 W=%d
 H=%d
 EOF
-/home/alfaos/.local/bin/alfaos-set-resolution.sh >/tmp/alfaos-resolution.log 2>&1 || true
-`, w, h)
-	_, err = vm.RunSSH(ip, script)
-	return err
+sudo tee /etc/alfaos/rdp-quality >/dev/null <<EOF
+QUALITY=%s
+BPP=%d
+EOF
+
+# Persist xRDP color depth (takes effect on next RDP connect)
+if [ -f /etc/xrdp/xrdp.ini ]; then
+  if grep -q '^max_bpp=' /etc/xrdp/xrdp.ini; then
+    sudo sed -i 's/^max_bpp=.*/max_bpp=%d/' /etc/xrdp/xrdp.ini
+  else
+    sudo sed -i '/^\[Globals\]/a max_bpp=%d' /etc/xrdp/xrdp.ini
+  fi
+fi
+
+sudo tee /home/alfaos/.local/bin/alfaos-apply-quality.sh >/dev/null << 'APPLYSCRIPT'
+#!/bin/bash
+set -euo pipefail
+[ -f /etc/alfaos/rdp-resolution ] && . /etc/alfaos/rdp-resolution
+W=${W:-1920}
+H=${H:-1080}
+LOG=/tmp/alfaos-quality.log
+: > "$LOG"
+echo "target ${W}x${H}" >> "$LOG"
+
+set_mode_on_display() {
+  local display="$1" xauth="$2" output mode modeline
+  export DISPLAY="$display"
+  if [ -n "$xauth" ] && [ -f "$xauth" ]; then
+    export XAUTHORITY="$xauth"
+  else
+    unset XAUTHORITY || true
+  fi
+  echo "try DISPLAY=$display XAUTHORITY=${XAUTHORITY:-}" >> "$LOG"
+  for _ in $(seq 1 10); do
+    output=$(xrandr 2>/dev/null | awk '/ connected/{print $1; exit}')
+    [ -n "$output" ] && break
+    sleep 0.3
+  done
+  [ -n "$output" ] || { echo "no output on $display" >> "$LOG"; return 1; }
+
+  if xrandr --output "$output" --mode "${W}x${H}" >>"$LOG" 2>&1; then
+    echo "set ${W}x${H} on $output ($display)" >> "$LOG"
+    return 0
+  fi
+  while IFS= read -r mode; do
+    if xrandr --output "$output" --mode "$mode" >>"$LOG" 2>&1; then
+      echo "set $mode on $output ($display)" >> "$LOG"
+      return 0
+    fi
+  done < <(xrandr 2>/dev/null | awk -v w="$W" -v h="$H" '$0 ~ w"x"h {print $1}')
+
+  if command -v cvt >/dev/null 2>&1; then
+    modeline=$(cvt "$W" "$H" 60 2>/dev/null | awk '/Modeline/{sub(/^Modeline /,""); print}')
+    [ -n "$modeline" ] || return 1
+    mode=$(echo "$modeline" | awk '{print $1}' | tr -d '"')
+    xrandr --newmode $modeline >>"$LOG" 2>&1 || true
+    xrandr --addmode "$output" "$mode" >>"$LOG" 2>&1 || true
+    if xrandr --output "$output" --mode "$mode" >>"$LOG" 2>&1; then
+      echo "created+set $mode on $output ($display)" >> "$LOG"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+ok=0
+# Prefer live Xorg sessions owned by alfaos (xrdp)
+for pid in $(pgrep -u alfaos -x Xorg 2>/dev/null; pgrep -u alfaos -x Xorg.bin 2>/dev/null); do
+  envfile="/proc/$pid/environ"
+  [ -r "$envfile" ] || continue
+  display=$(tr '\0' '\n' < "$envfile" | sed -n 's/^DISPLAY=//p' | head -1)
+  xauth=$(tr '\0' '\n' < "$envfile" | sed -n 's/^XAUTHORITY=//p' | head -1)
+  [ -n "$display" ] || continue
+  if set_mode_on_display "$display" "$xauth"; then
+    ok=1
+  fi
+done
+
+# Fallback: scan sockets :10-:30 (typical xrdp range)
+if [ "$ok" -eq 0 ]; then
+  for n in $(seq 10 30); do
+    sock="/tmp/.X11-unix/X$n"
+    [ -S "$sock" ] || continue
+    if set_mode_on_display ":$n" "/home/alfaos/.Xauthority"; then
+      ok=1
+      break
+    fi
+    # xorgxrdp sometimes stores auth under /run
+    for auth in /run/xrdp/sockdir/* /var/run/xrdp/*; do
+      [ -f "$auth" ] || continue
+      if set_mode_on_display ":$n" "$auth"; then
+        ok=1
+        break 2
+      fi
+    done
+  done
+fi
+
+if [ "$ok" -eq 1 ]; then
+  echo APPLIED
+  exit 0
+fi
+echo "FAILED — no live X display resized (will apply on next RDP login)" >> "$LOG"
+exit 2
+APPLYSCRIPT
+sudo chmod +x /home/alfaos/.local/bin/alfaos-apply-quality.sh
+sudo chown alfaos:alfaos /home/alfaos/.local/bin/alfaos-apply-quality.sh
+
+# Keep legacy name working for startwm/reconnectwm
+sudo ln -sf /home/alfaos/.local/bin/alfaos-apply-quality.sh /home/alfaos/.local/bin/alfaos-set-resolution.sh
+
+# Also refresh reconnect/start hooks to call the apply script
+if [ -f /etc/xrdp/reconnectwm.sh ]; then
+  sudo tee /etc/xrdp/reconnectwm.sh >/dev/null << 'RECONNECT'
+#!/bin/sh
+/home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true
+RECONNECT
+  sudo chmod +x /etc/xrdp/reconnectwm.sh
+fi
+
+sudo -u alfaos /home/alfaos/.local/bin/alfaos-apply-quality.sh
+`, w, h, quality, bpp, bpp, bpp)
+
+	out, err := vm.RunSSH(ip, "bash -lc "+strconv.Quote(script))
+	if err != nil {
+		// exit 2 = saved but live resize failed — still partially OK
+		if strings.Contains(out, "FAILED") || strings.Contains(err.Error(), "exit status 2") {
+			return false, fmt.Errorf("live resize failed — reconnect RDP (log: /tmp/alfaos-quality.log)")
+		}
+		return false, fmt.Errorf("%w\n%s", err, out)
+	}
+	return strings.Contains(out, "APPLIED"), nil
+}
+
+func qualityBPP(quality string) int {
+	switch strings.ToLower(quality) {
+	case "low":
+		return 16
+	case "medium":
+		return 24
+	default:
+		return 32
+	}
+}
+
+func effectiveQuality(cfg *config.Config) string {
+	if q := cfg.RDPQualityName(); q != "" {
+		return q
+	}
+	return QualityNameFromSize(cfg.RDP.Width, cfg.RDP.Height)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
