@@ -268,7 +268,7 @@ impl AlfaCenterApp {
 
         egui::ComboBox::from_label("Profile")
             .selected_text(match self.quality.as_str() {
-                "low" => "Slow link — 16-bit + max compression + light desktop",
+                "low" => "Slow link — 16-bit + compression + alfaoslite wallpaper",
                 "medium" => "Balanced — 24-bit + compression",
                 "high" => "LAN / fast — 32-bit",
                 "ultra" => "Max quality — 32-bit, light compression",
@@ -278,7 +278,7 @@ impl AlfaCenterApp {
                 ui.selectable_value(
                     &mut self.quality,
                     "low".into(),
-                    "Slow link — 16-bit + max compression + light desktop",
+                    "Slow link — 16-bit + compression + alfaoslite wallpaper",
                 );
                 ui.selectable_value(
                     &mut self.quality,

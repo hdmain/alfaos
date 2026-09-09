@@ -449,10 +449,22 @@ if [ -f /etc/xrdp/xrdp.ini ]; then
   set_ini use_fastpath both
   set_ini bitmap_cache true
   set_ini bitmap_compression true
-  set_ini pointer_cache_size 32
+	set_ini pointer_cache_size 32
   echo XRDP_OK
 fi
-`, w, h, quality, bpp, compress, light, bpp, compress, crypt)
+
+# Slow link wallpaper
+if [ "%s" = "1" ]; then
+  WALL=/usr/share/backgrounds/alfaos/alfaoslite.jpg
+else
+  WALL=/usr/share/backgrounds/alfaos/alfaos3.png
+fi
+if [ -f "$WALL" ]; then
+  for prop in $(sudo -u alfaos xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/last-image$' || true); do
+    sudo -u alfaos xfconf-query -c xfce4-desktop -p "$prop" -s "$WALL" 2>/dev/null || true
+  done
+fi
+`, w, h, quality, bpp, compress, light, bpp, compress, crypt, light)
 
 	out, err := vm.RunSSH(ip, "bash -lc "+strconv.Quote(script))
 	if err != nil {

@@ -185,6 +185,7 @@ sudo mkdir -p /usr/share/backgrounds/alfaos
 sudo cp /tmp/alfa1.jpeg /usr/share/backgrounds/alfaos/alfa1.jpeg
 sudo cp /tmp/alfa2.jpeg /usr/share/backgrounds/alfaos/alfa2.jpeg
 sudo cp /tmp/alfaos3.png /usr/share/backgrounds/alfaos/alfaos3.png
+sudo cp /tmp/alfaoslite.jpg /usr/share/backgrounds/alfaos/alfaoslite.jpg 2>/dev/null || true
 
 echo "==> Writing XFCE configuration..."
 mkdir -p /home/alfaos/.config/{xfce4/xfconf/xfce-perchannel-xml,gtk-3.0,autostart}

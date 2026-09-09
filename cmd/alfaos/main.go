@@ -19,6 +19,7 @@ import (
 	"github.com/alfaos/alfaos/internal/power"
 	"github.com/alfaos/alfaos/internal/rdp"
 	"github.com/alfaos/alfaos/internal/virtualization"
+	"github.com/alfaos/alfaos/internal/wallpapers"
 	"github.com/spf13/cobra"
 )
 
@@ -429,8 +430,12 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 	if err := guestsetup.InstallAlfaCenter(cfg, vm, vmIP, true); err != nil {
 		return err
 	}
+	// Ensure lite wallpaper is on the guest for Slow link profile
+	if err := wallpapers.New(cfg, vm).Install(vmIP); err != nil {
+		logging.Warn("Wallpapers refresh: %v", err)
+	}
 	fmt.Printf("Alfa Center ready — open it from the VM desktop (API %s)\n", centerapi.APIURLForGuest(cfg))
-	fmt.Println("Tip: in Alfa Center pick Slow link, Apply, then reconnect RDP once")
+	fmt.Println("Tip: in Alfa Center pick Slow link, Apply — uses wallpaper alfaoslite.jpg")
 	fmt.Println("Tip: run sudo alfaos tune only when you want to re-apply KVM performance options")
 	return nil
 }

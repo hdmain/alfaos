@@ -160,6 +160,8 @@ install_config() {
   curl -fsSL "${raw_base}/configs/default.yaml" -o /etc/alfaos/config.yaml
   curl -fsSL "${raw_base}/assets/alfa1.jpeg" -o /usr/share/alfaos/assets/alfa1.jpeg 2>/dev/null || true
   curl -fsSL "${raw_base}/assets/alfa2.jpeg" -o /usr/share/alfaos/assets/alfa2.jpeg 2>/dev/null || true
+  curl -fsSL "${raw_base}/assets/alfaos3.png" -o /usr/share/alfaos/assets/alfaos3.png 2>/dev/null || true
+  curl -fsSL "${raw_base}/assets/alfaoslite.jpg" -o /usr/share/alfaos/assets/alfaoslite.jpg 2>/dev/null || true
 }
 
 echo "==> ALFAOS one-line installer"

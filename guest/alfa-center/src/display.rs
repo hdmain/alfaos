@@ -122,23 +122,38 @@ if [ -n "$OUTPUT" ]; then
      xrandr --output "$OUTPUT" --mode "$MODE" >>"$LOG" 2>&1 || true) || true
 fi
 
-# --- Light desktop for slow links (less pixels to encode) ---
+# --- Light desktop for slow links (lite wallpaper = cheaper to encode over RDP) ---
+LITE_WALL=/usr/share/backgrounds/alfaos/alfaoslite.jpg
+FULL_WALL=/usr/share/backgrounds/alfaos/alfaos3.png
 if [ "{light}" = "1" ]; then
   xfconf-query -c xfwm4 -p /general/use_compositing -s false 2>/dev/null || true
   xfconf-query -c xfwm4 -p /general/workspace_count -s 1 2>/dev/null || true
   xfconf-query -c xfce4-desktop -p /desktop-icons/style -s 0 2>/dev/null || true
-  # Solid dark wallpaper = fewer bitmap updates than a photo
-  for prop in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -E 'last-image|image-style' || true); do
-    case "$prop" in
-      *image-style) xfconf-query -c xfce4-desktop -p "$prop" -s 1 2>/dev/null || true ;; # solid color
-      *last-image) xfconf-query -c xfce4-desktop -p "$prop" -s "" 2>/dev/null || true ;;
-    esac
-  done
-  # Reduce channel / panel redraws a bit
+  WALL="$LITE_WALL"
+  if [ ! -f "$WALL" ]; then
+    echo "missing $LITE_WALL — keeping current wallpaper" >> "$LOG"
+    WALL=""
+  fi
+  if [ -n "$WALL" ]; then
+    for prop in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/last-image$' || true); do
+      xfconf-query -c xfce4-desktop -p "$prop" -s "$WALL" 2>/dev/null || \
+        xfconf-query -c xfce4-desktop -p "$prop" -n -t string -s "$WALL" 2>/dev/null || true
+    done
+    for prop in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/image-style$' || true); do
+      xfconf-query -c xfce4-desktop -p "$prop" -s 5 2>/dev/null || true  # scaled
+    done
+    echo "lite wallpaper: $WALL" >> "$LOG"
+  fi
   xfconf-query -c xfce4-panel -p /panels/panel-1/background-style -s 0 2>/dev/null || true
   echo "light desktop applied" >> "$LOG"
 else
   xfconf-query -c xfce4-desktop -p /desktop-icons/style -s 2 2>/dev/null || true
+  if [ -f "$FULL_WALL" ]; then
+    for prop in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/last-image$' || true); do
+      xfconf-query -c xfce4-desktop -p "$prop" -s "$FULL_WALL" 2>/dev/null || true
+    done
+    echo "restored wallpaper: $FULL_WALL" >> "$LOG"
+  fi
 fi
 
 CURRENT=$(xrandr 2>/dev/null | awk '/\*/{{print $1; exit}}' || echo unknown)
@@ -173,7 +188,7 @@ echo "OK profile={pname} bpp={bpp} compress={compress} display=$CURRENT"
 
     Ok(format!(
         "Profile '{}' applied ({}-bit, compression={}, light_desktop={}). \
-         Reconnect RDP once. Display size may stay the same — that is OK.",
+         Slow link uses wallpaper alfaoslite.jpg. Reconnect RDP once if needed.",
         profile.name, bpp, compress, profile.light_desktop
     ))
 }
