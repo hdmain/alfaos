@@ -156,6 +156,94 @@ else
   fi
 fi
 
+# --- Persist forever: re-apply on every XFCE login / RDP reconnect ---
+mkdir -p /home/alfaos/.local/bin /home/alfaos/.config/autostart
+cat > /home/alfaos/.local/bin/alfaos-apply-quality.sh << 'QSCRIPT'
+#!/bin/bash
+[ -f /etc/alfaos/rdp-quality ] || exit 0
+. /etc/alfaos/rdp-quality
+QUALITY=${{QUALITY:-high}}
+BPP=${{BPP:-24}}
+COMPRESS=${{COMPRESS:-true}}
+LIGHT=${{LIGHT:-0}}
+Q=$(echo "$QUALITY" | tr 'A-Z' 'a-z')
+CRYPT=high
+case "$Q" in
+  low|slow) CRYPT=low; BPP=${{BPP:-16}}; LIGHT=${{LIGHT:-1}} ;;
+  medium|med|balanced) CRYPT=medium; BPP=${{BPP:-24}} ;;
+  ultra|max) COMPRESS=${{COMPRESS:-false}} ;;
+esac
+set_ini() {{
+  [ -f /etc/xrdp/xrdp.ini ] || return 0
+  local key="$1" val="$2"
+  if grep -q "^${{key}}=" /etc/xrdp/xrdp.ini 2>/dev/null; then
+    sudo sed -i "s/^${{key}}=.*/${{key}}=${{val}}/" /etc/xrdp/xrdp.ini
+  else
+    sudo sed -i "/^\[Globals\]/a ${{key}}=${{val}}" /etc/xrdp/xrdp.ini
+  fi
+}}
+set_ini max_bpp "$BPP"
+set_ini bulk_compression "$COMPRESS"
+set_ini tcp_nodelay true
+set_ini tcp_keepalive true
+set_ini crypt_level "$CRYPT"
+set_ini use_fastpath both
+set_ini bitmap_cache true
+set_ini bitmap_compression true
+set_ini pointer_cache_size 32
+[ -n "${{DISPLAY:-}}" ] || exit 0
+command -v xfconf-query >/dev/null 2>&1 || exit 0
+LITE_WALL=/usr/share/backgrounds/alfaos/alfaoslite.jpg
+FULL_WALL=/usr/share/backgrounds/alfaos/alfaos3.png
+if [ "$LIGHT" = "1" ]; then WALL="$LITE_WALL"; ICON_STYLE=0
+  xfconf-query -c xfwm4 -p /general/use_compositing -s false 2>/dev/null || true
+else WALL="$FULL_WALL"; ICON_STYLE=2; fi
+[ -f "$WALL" ] || WALL=""
+xfconf-query -c xfce4-desktop -p /desktop-icons/style -s "$ICON_STYLE" 2>/dev/null || true
+if [ -n "$WALL" ]; then
+  for prop in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/last-image$' || true); do
+    xfconf-query -c xfce4-desktop -p "$prop" -s "$WALL" 2>/dev/null || true
+  done
+  xfdesktop --reload 2>/dev/null || true
+fi
+QSCRIPT
+chmod +x /home/alfaos/.local/bin/alfaos-apply-quality.sh
+
+cat > /home/alfaos/.config/autostart/alfaos-quality-apply.desktop << 'AUTO'
+[Desktop Entry]
+Type=Application
+Name=ALFAOS Quality Persist
+Exec=/home/alfaos/.local/bin/alfaos-apply-quality.sh
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+OnlyShowIn=XFCE;
+AUTO
+
+if [ -f /home/alfaos/.local/bin/alfaos-apply-desktop.sh ] && \
+   ! grep -q 'alfaos-apply-quality.sh' /home/alfaos/.local/bin/alfaos-apply-desktop.sh; then
+  printf '\n[ -x /home/alfaos/.local/bin/alfaos-apply-quality.sh ] && /home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true\n' \
+    >> /home/alfaos/.local/bin/alfaos-apply-desktop.sh
+fi
+
+sudo tee /etc/xrdp/startwm.sh >/dev/null << 'STARTWM'
+#!/bin/sh
+if [ -r /etc/default/locale ]; then . /etc/default/locale; export LANG LANGUAGE; fi
+if [ -r /etc/profile ]; then . /etc/profile; fi
+unset DBUS_SESSION_BUS_ADDRESS
+unset XDG_RUNTIME_DIR
+/home/alfaos/.local/bin/alfaos-set-resolution.sh >/tmp/alfaos-resolution.log 2>&1 || true
+/home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true
+exec startxfce4
+STARTWM
+sudo chmod +x /etc/xrdp/startwm.sh
+sudo tee /etc/xrdp/reconnectwm.sh >/dev/null << 'RECONNECT'
+#!/bin/sh
+/home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true
+/home/alfaos/.local/bin/alfaos-set-resolution.sh >/tmp/alfaos-resolution.log 2>&1 || true
+RECONNECT
+sudo chmod +x /etc/xrdp/reconnectwm.sh
+echo "persistence hooks installed" >> "$LOG"
+
 CURRENT=$(xrandr 2>/dev/null | awk '/\*/{{print $1; exit}}' || echo unknown)
 echo "OK profile={pname} bpp={bpp} compress={compress} display=$CURRENT"
 "#,
@@ -187,8 +275,8 @@ echo "OK profile={pname} bpp={bpp} compress={compress} display=$CURRENT"
     }
 
     Ok(format!(
-        "Profile '{}' applied ({}-bit, compression={}, light_desktop={}). \
-         Slow link uses wallpaper alfaoslite.jpg. Reconnect RDP once if needed.",
+        "Profile '{}' applied permanently ({}-bit, compression={}, light_desktop={}). \
+         Survives reconnect and reboot. Slow link uses alfaoslite.jpg.",
         profile.name, bpp, compress, profile.light_desktop
     ))
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/alfaos/alfaos/internal/centerapi"
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/logging"
+	"github.com/alfaos/alfaos/internal/rdp"
 	"github.com/alfaos/alfaos/internal/virtualization"
 )
 
@@ -121,6 +122,10 @@ sha256sum /usr/local/bin/alfa-center | awk '{print "sha256:", $1}'
 	}
 	if strings.TrimSpace(out) != "" {
 		logging.Info("%s", strings.TrimSpace(out))
+	}
+
+	if err := rdp.New(cfg, vm).InstallQualityHooks(ip); err != nil {
+		logging.Warn("quality persistence hooks: %v", err)
 	}
 
 	logging.Success("Alfa Center installed on guest desktop (API %s)", apiURL)

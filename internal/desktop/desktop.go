@@ -298,7 +298,20 @@ flock -n 9 || exit 0
 GTK_THEME="%s"
 WM_THEME="%s"
 ICON_THEME="%s"
-WALL="%s"
+DEFAULT_WALL="%s"
+LITE_WALL=/usr/share/backgrounds/alfaos/alfaoslite.jpg
+WALL="$DEFAULT_WALL"
+ICON_STYLE=2
+
+# Honor Alfa Center Slow link (and other profiles) forever
+if [ -f /etc/alfaos/rdp-quality ]; then
+  # shellcheck disable=SC1091
+  . /etc/alfaos/rdp-quality
+  if [ "${LIGHT:-0}" = "1" ] && [ -f "$LITE_WALL" ]; then
+    WALL="$LITE_WALL"
+    ICON_STYLE=0
+  fi
+fi
 
 # Wait for XFCE session (dbus + panel) before touching settings
 for _ in $(seq 1 30); do
@@ -314,8 +327,8 @@ xfconf-query -c xfwm4 -p /general/theme -s "$WM_THEME" 2>/dev/null || \
   xfconf-query -c xfwm4 -p /general/theme -n -t string -s "$WM_THEME"
 xfconf-query -c xfwm4 -p /general/use_compositing -s false 2>/dev/null || \
   xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false
-xfconf-query -c xfce4-desktop -p /desktop-icons/style -s 2 2>/dev/null || \
-  xfconf-query -c xfce4-desktop -p /desktop-icons/style -n -t int -s 2 2>/dev/null || true
+xfconf-query -c xfce4-desktop -p /desktop-icons/style -s "$ICON_STYLE" 2>/dev/null || \
+  xfconf-query -c xfce4-desktop -p /desktop-icons/style -n -t int -s "$ICON_STYLE" 2>/dev/null || true
 
 apply_wallpaper() {
   local base="$1"
@@ -348,6 +361,10 @@ if [ -f "$WALL" ]; then
 
   xfdesktop --reload 2>/dev/null || true
 fi
+
+# Re-apply full link profile (xrdp.ini + light desktop) if hooks are installed
+[ -x /home/alfaos/.local/bin/alfaos-apply-quality.sh ] && \
+  /home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true
 APPLY
 chmod +x /home/alfaos/.local/bin/alfaos-apply-desktop.sh
 

@@ -41,6 +41,11 @@ func (r *Configurator) ConfigScriptWithApt(includeApt bool) string {
 	if port <= 0 {
 		port = 3389
 	}
+	quality := r.cfg.RDPQualityName()
+	if quality == "" {
+		quality = "low"
+	}
+	bpp, compress, crypt, light := QualityProfileParams(quality)
 
 	body := fmt.Sprintf(`echo "==> Configuring xRDP for XFCE..."
 echo "xfce4-session" > /home/alfaos/.xsession
@@ -54,6 +59,16 @@ cat | sudo tee /etc/alfaos/rdp-resolution > /dev/null << 'RESCFG'
 W=%d
 H=%d
 RESCFG
+
+cat | sudo tee /etc/alfaos/rdp-quality > /dev/null << 'QCFG'
+QUALITY=%s
+PROFILE=%s
+BPP=%d
+COMPRESS=%s
+LIGHT=%s
+W=%d
+H=%d
+QCFG
 
 mkdir -p /home/alfaos/.local/bin
 cat > /home/alfaos/.local/bin/alfaos-set-resolution.sh << 'RESSCRIPT'
@@ -102,8 +117,8 @@ fi
 sudo sed -i 's/^drdynvc=.*/drdynvc=true/' /etc/xrdp/xrdp.ini 2>/dev/null || true
 grep -q '^drdynvc=' /etc/xrdp/xrdp.ini 2>/dev/null || sudo sed -i '/^\[Globals\]/a drdynvc=true' /etc/xrdp/xrdp.ini
 
-# Low-latency + compression defaults (profiles refine these later)
-for kv in tcp_nodelay=true tcp_keepalive=true bulk_compression=true new_cursors=true use_fastpath=both bitmap_cache=true bitmap_compression=true max_bpp=24 crypt_level=medium; do
+# Profile-aware defaults (Alfa Center Apply updates /etc/alfaos/rdp-quality + these keys)
+for kv in tcp_nodelay=true tcp_keepalive=true bulk_compression=%s new_cursors=true use_fastpath=both bitmap_cache=true bitmap_compression=true max_bpp=%d crypt_level=%s; do
   key="${kv%%=*}"
   val="${kv#*=}"
   if grep -q "^${key}=" /etc/xrdp/xrdp.ini 2>/dev/null; then
@@ -118,29 +133,8 @@ sudo sed -i 's/^Policy=.*/Policy=UBD/' /etc/xrdp/sesman.ini 2>/dev/null || true
 sudo sed -i 's/^KillDisconnected=.*/KillDisconnected=true/' /etc/xrdp/sesman.ini 2>/dev/null || true
 sudo sed -i 's/^DisconnectedTimeLimit=.*/DisconnectedTimeLimit=60/' /etc/xrdp/sesman.ini 2>/dev/null || true
 
-cat | sudo tee /etc/xrdp/startwm.sh > /dev/null << 'STARTWM'
-#!/bin/sh
-if [ -r /etc/default/locale ]; then
-  . /etc/default/locale
-  export LANG LANGUAGE
-fi
-if [ -r /etc/profile ]; then
-  . /etc/profile
-fi
-unset DBUS_SESSION_BUS_ADDRESS
-unset XDG_RUNTIME_DIR
-/home/alfaos/.local/bin/alfaos-set-resolution.sh >/tmp/alfaos-resolution.log 2>&1 || \
-  /home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true
-exec startxfce4
-STARTWM
-sudo chmod +x /etc/xrdp/startwm.sh
-
-cat | sudo tee /etc/xrdp/reconnectwm.sh > /dev/null << 'RECONNECT'
-#!/bin/sh
-/home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || \
-  /home/alfaos/.local/bin/alfaos-set-resolution.sh >/tmp/alfaos-resolution.log 2>&1 || true
-RECONNECT
-sudo chmod +x /etc/xrdp/reconnectwm.sh
+# Persist Alfa Center profile across login / reconnect
+%s
 
 echo "==> Configuring firewall for RDP port %d..."
 if command -v ufw >/dev/null 2>&1; then
@@ -151,8 +145,11 @@ echo "==> Enabling and starting xRDP..."
 sudo systemctl enable xrdp
 sudo systemctl restart xrdp
 
-echo "==> RDP configured (default resolution %dx%d)."
-`, width, height, port, port, width, height)
+echo "==> RDP configured (default resolution %dx%d, quality %s)."
+`, width, height, quality, quality, bpp, compress, light, width, height,
+		compress, bpp, crypt,
+		InstallQualityHooksBash(quality, width, height),
+		port, port, width, height, quality)
 
 	if !includeApt {
 		return body

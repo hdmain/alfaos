@@ -333,8 +333,8 @@ impl AlfaCenterApp {
         ui.add_space(10.0);
         ui.label(
             RichText::new(
-                "After Apply: disconnect RDP once and reconnect.\n\
-                 On a slow connection pick Slow link — it uses less bandwidth even if Display stays 1920×1080.",
+                "Apply once — settings persist across RDP reconnect and reboot.\n\
+                 On a slow connection pick Slow link (alfaoslite wallpaper, less bandwidth).",
             )
             .color(Color32::from_rgb(120, 120, 120))
             .size(12.0),

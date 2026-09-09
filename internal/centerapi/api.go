@@ -18,6 +18,7 @@ import (
 	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/networking"
 	"github.com/alfaos/alfaos/internal/passwd"
+	"github.com/alfaos/alfaos/internal/rdp"
 	"github.com/alfaos/alfaos/internal/virtualization"
 )
 
@@ -427,9 +428,12 @@ H=%d
 EOF
 sudo tee /etc/alfaos/rdp-quality >/dev/null <<EOF
 QUALITY=%s
+PROFILE=%s
 BPP=%d
 COMPRESS=%s
 LIGHT=%s
+W=%d
+H=%d
 EOF
 
 if [ -f /etc/xrdp/xrdp.ini ]; then
@@ -464,11 +468,15 @@ if [ -f "$WALL" ]; then
     sudo -u alfaos xfconf-query -c xfce4-desktop -p "$prop" -s "$WALL" 2>/dev/null || true
   done
 fi
-`, w, h, quality, bpp, compress, light, bpp, compress, crypt, light)
+`, w, h, quality, quality, bpp, compress, light, w, h, bpp, compress, crypt, light)
 
 	out, err := vm.RunSSH(ip, "bash -lc "+strconv.Quote(script))
 	if err != nil {
 		return false, fmt.Errorf("%w\n%s", err, out)
+	}
+	// Ensure login/reconnect re-applies this profile forever.
+	if err := rdp.New(cfg, vm).InstallQualityHooks(ip); err != nil {
+		logging.Warn("quality persistence hooks: %v", err)
 	}
 	return strings.Contains(out, "XRDP_OK"), nil
 }
