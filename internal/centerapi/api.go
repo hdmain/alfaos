@@ -407,17 +407,17 @@ func applyGuestQuality(cfg *config.Config, quality string, w, h int) (bool, erro
 		return false, err
 	}
 	bpp := qualityBPP(quality)
-	compress := "true"
-	crypt := "high"
-	light := "0"
+	bulk, bitmap, crypt, light := "true", "true", "high", "0"
 	switch strings.ToLower(quality) {
 	case "low", "slow":
 		crypt = "low"
 		light = "1"
 	case "medium", "balanced":
 		crypt = "medium"
-	case "ultra", "max":
-		compress = "false"
+	case "high", "lan", "ultra", "max":
+		bulk = "false"
+		bitmap = "false"
+		crypt = "low"
 	}
 
 	script := fmt.Sprintf(`set -euo pipefail
@@ -431,6 +431,7 @@ QUALITY=%s
 PROFILE=%s
 BPP=%d
 COMPRESS=%s
+BITMAP_COMPRESS=%s
 LIGHT=%s
 W=%d
 H=%d
@@ -451,9 +452,10 @@ if [ -f /etc/xrdp/xrdp.ini ]; then
   set_ini tcp_keepalive true
   set_ini crypt_level %s
   set_ini use_fastpath both
+  set_ini new_cursors true
   set_ini bitmap_cache true
-  set_ini bitmap_compression true
-	set_ini pointer_cache_size 32
+  set_ini bitmap_compression %s
+  set_ini pointer_cache_size 32
   echo XRDP_OK
 fi
 
@@ -468,7 +470,7 @@ if [ -f "$WALL" ]; then
     sudo -u alfaos xfconf-query -c xfce4-desktop -p "$prop" -s "$WALL" 2>/dev/null || true
   done
 fi
-`, w, h, quality, quality, bpp, compress, light, w, h, bpp, compress, crypt, light)
+`, w, h, quality, quality, bpp, bulk, bitmap, light, w, h, bpp, bulk, crypt, bitmap, light)
 
 	out, err := vm.RunSSH(ip, "bash -lc "+strconv.Quote(script))
 	if err != nil {

@@ -68,7 +68,8 @@ func Run(cfg *config.Config) error {
 	return fmt.Errorf("no RDP client found — install: sudo apt install freerdp3-x11")
 }
 
-// xfreerdpArgs picks compression/network profile from rdp.quality (slow link friendly).
+// xfreerdpArgs picks compression/network profile from rdp.quality.
+// LAN profiles prioritize low input lag (gfx/rfx, no modem buffering).
 func xfreerdpArgs(cfg *config.Config, ip, user, pass, res string) []string {
 	net, compress, bpp := freerdpProfile(cfg)
 	args := []string{
@@ -82,13 +83,17 @@ func xfreerdpArgs(cfg *config.Config, ip, user, pass, res string) []string {
 		"/bpp:" + fmt.Sprintf("%d", bpp),
 		"/compression-level:" + compress,
 		"/sound:off",
+		// Prefer GFX/RFX path — legacy bitmap + -gfx feels sluggish for mouse
+		"/gfx",
+		"/rfx",
 	}
-	q := strings.ToLower(cfg.RDP.Quality)
-	if q == "low" || q == "slow" || q == "medium" || q == "balanced" {
-		// Cut visual chrome on slow/wan links (less bandwidth)
-		args = append(args, "-wallpaper", "-themes", "-menu-anims", "-window-drag", "-gfx")
-	} else {
-		args = append(args, "/gfx", "/rfx")
+	q := strings.ToLower(strings.TrimSpace(cfg.RDP.Quality))
+	switch q {
+	case "low", "slow":
+		// Bandwidth save without modem-tier update buffering
+		args = append(args, "-wallpaper", "-themes", "-menu-anims", "-window-drag")
+	case "medium", "med", "balanced":
+		args = append(args, "-menu-anims", "-window-drag")
 	}
 	return args
 }
@@ -96,13 +101,14 @@ func xfreerdpArgs(cfg *config.Config, ip, user, pass, res string) []string {
 func freerdpProfile(cfg *config.Config) (network, compressLevel string, bpp int) {
 	switch strings.ToLower(strings.TrimSpace(cfg.RDP.Quality)) {
 	case "low", "slow":
-		return "modem", "2", 16
+		// wan (not modem): modem adds noticeable mouse/update buffering
+		return "wan", "2", 16
 	case "medium", "balanced":
 		return "wan", "1", 24
 	case "ultra", "max":
 		return "lan", "0", 32
-	default:
-		return "lan", "1", 32
+	default: // high / lan
+		return "lan", "0", 32
 	}
 }
 
@@ -114,7 +120,7 @@ func rdpBPP(cfg *config.Config) int {
 func rdesktopExperience(cfg *config.Config) string {
 	switch strings.ToLower(cfg.RDP.Quality) {
 	case "low", "slow":
-		return "modem"
+		return "broadband" // closer to wan; modem feels laggy
 	case "medium", "balanced":
 		return "broadband"
 	default:

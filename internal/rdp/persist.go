@@ -11,23 +11,33 @@ import (
 )
 
 // QualityProfileParams returns xRDP/desktop knobs for a named quality preset.
-func QualityProfileParams(quality string) (bpp int, compress, crypt, light string) {
+// bulkCompress / bitmapCompress trade bandwidth for encode latency — off on LAN profiles.
+func QualityProfileParams(quality string) (bpp int, bulkCompress, bitmapCompress, crypt, light string) {
 	bpp = 32
-	compress = "true"
-	crypt = "high"
+	bulkCompress = "false"
+	bitmapCompress = "false"
+	crypt = "medium"
 	light = "0"
 	switch strings.ToLower(strings.TrimSpace(quality)) {
 	case "low", "slow":
 		bpp = 16
+		bulkCompress = "true"
+		bitmapCompress = "true"
 		crypt = "low"
 		light = "1"
 	case "medium", "med", "balanced":
 		bpp = 24
+		bulkCompress = "true"
+		bitmapCompress = "true"
 		crypt = "medium"
 	case "ultra", "max":
-		compress = "false"
+		crypt = "low" // less PDU crypto overhead on LAN
+	case "high", "lan":
+		crypt = "low"
+	default:
+		// high / unknown → low-latency LAN defaults above
 	}
-	return bpp, compress, crypt, light
+	return bpp, bulkCompress, bitmapCompress, crypt, light
 }
 
 // ApplyQualityScriptBody is the guest script that re-applies /etc/alfaos/rdp-quality
@@ -40,24 +50,31 @@ func ApplyQualityScriptBody() string {
 . /etc/alfaos/rdp-quality
 
 QUALITY=${QUALITY:-high}
-BPP=${BPP:-24}
-COMPRESS=${COMPRESS:-true}
+BPP=${BPP:-32}
+COMPRESS=${COMPRESS:-false}
+BITMAP_COMPRESS=${BITMAP_COMPRESS:-false}
 LIGHT=${LIGHT:-0}
 Q=$(echo "$QUALITY" | tr 'A-Z' 'a-z')
-CRYPT=high
+CRYPT=${CRYPT:-low}
 case "$Q" in
   low|slow)
     CRYPT=low
     BPP=${BPP:-16}
-    [ -n "${LIGHT}" ] || LIGHT=1
+    COMPRESS=true
+    BITMAP_COMPRESS=true
     LIGHT=${LIGHT:-1}
     ;;
   medium|med|balanced)
     CRYPT=medium
     BPP=${BPP:-24}
+    COMPRESS=true
+    BITMAP_COMPRESS=true
     ;;
-  ultra|max)
-    COMPRESS=${COMPRESS:-false}
+  ultra|max|high|lan)
+    CRYPT=low
+    BPP=${BPP:-32}
+    COMPRESS=false
+    BITMAP_COMPRESS=false
     ;;
 esac
 
@@ -77,8 +94,9 @@ set_ini tcp_nodelay true
 set_ini tcp_keepalive true
 set_ini crypt_level "$CRYPT"
 set_ini use_fastpath both
+set_ini new_cursors true
 set_ini bitmap_cache true
-set_ini bitmap_compression true
+set_ini bitmap_compression "$BITMAP_COMPRESS"
 set_ini pointer_cache_size 32
 
 # Desktop tweaks need an X session (autostart / reconnect).
@@ -127,7 +145,7 @@ func InstallQualityHooksBash(seedQuality string, width, height int) string {
 	if q == "" {
 		q = "low"
 	}
-	bpp, compress, _, light := QualityProfileParams(q)
+	bpp, compress, bitmapCompress, _, light := QualityProfileParams(q)
 
 	return fmt.Sprintf(`set -euo pipefail
 sudo mkdir -p /etc/alfaos /home/alfaos/.local/bin /home/alfaos/.config/autostart
@@ -139,6 +157,7 @@ QUALITY=%s
 PROFILE=%s
 BPP=%d
 COMPRESS=%s
+BITMAP_COMPRESS=%s
 LIGHT=%s
 W=%d
 H=%d
@@ -203,7 +222,7 @@ if [ -f /home/alfaos/.local/bin/alfaos-apply-desktop.sh ]; then
 fi
 
 echo QUALITY_HOOKS_OK
-`, q, q, bpp, compress, light, width, height, width, height, ApplyQualityScriptBody())
+`, q, q, bpp, compress, bitmapCompress, light, width, height, width, height, ApplyQualityScriptBody())
 }
 
 // InstallQualityHooks pushes persistence hooks to a running guest.
@@ -243,13 +262,14 @@ func SeedQualityFileBash(cfg *config.Config) string {
 	if h <= 0 {
 		h = 1080
 	}
-	bpp, compress, _, light := QualityProfileParams(q)
+	bpp, compress, bitmapCompress, _, light := QualityProfileParams(q)
 	return fmt.Sprintf(`sudo mkdir -p /etc/alfaos
 sudo tee /etc/alfaos/rdp-quality >/dev/null << EOF
 QUALITY=%s
 PROFILE=%s
 BPP=%d
 COMPRESS=%s
+BITMAP_COMPRESS=%s
 LIGHT=%s
 W=%d
 H=%d
@@ -258,5 +278,5 @@ sudo tee /etc/alfaos/rdp-resolution >/dev/null << EOF
 W=%d
 H=%d
 EOF
-`, q, q, bpp, compress, light, w, h, w, h)
+`, q, q, bpp, compress, bitmapCompress, light, w, h, w, h)
 }

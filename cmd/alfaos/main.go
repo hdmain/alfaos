@@ -435,8 +435,8 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 		logging.Warn("Wallpapers refresh: %v", err)
 	}
 	fmt.Printf("Alfa Center ready — open it from the VM desktop (API %s)\n", centerapi.APIURLForGuest(cfg))
-	fmt.Println("Tip: Apply a profile in Alfa Center once — it persists across reconnect/reboot")
-	fmt.Println("Tip: Slow link uses wallpaper alfaoslite.jpg")
+	fmt.Println("Tip: for low mouse lag pick LAN / fast in Alfa Center → Apply → reconnect RDP")
+	fmt.Println("Tip: connect with alfaos connect (direct VM IP); host :3389 proxy adds lag")
 	return nil
 }
 

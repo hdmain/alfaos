@@ -45,7 +45,7 @@ func (r *Configurator) ConfigScriptWithApt(includeApt bool) string {
 	if quality == "" {
 		quality = "low"
 	}
-	bpp, compress, crypt, light := QualityProfileParams(quality)
+	bpp, compress, bitmapCompress, crypt, light := QualityProfileParams(quality)
 
 	body := fmt.Sprintf(`echo "==> Configuring xRDP for XFCE..."
 echo "xfce4-session" > /home/alfaos/.xsession
@@ -65,6 +65,7 @@ QUALITY=%s
 PROFILE=%s
 BPP=%d
 COMPRESS=%s
+BITMAP_COMPRESS=%s
 LIGHT=%s
 W=%d
 H=%d
@@ -118,7 +119,7 @@ sudo sed -i 's/^drdynvc=.*/drdynvc=true/' /etc/xrdp/xrdp.ini 2>/dev/null || true
 grep -q '^drdynvc=' /etc/xrdp/xrdp.ini 2>/dev/null || sudo sed -i '/^\[Globals\]/a drdynvc=true' /etc/xrdp/xrdp.ini
 
 # Profile-aware defaults (Alfa Center Apply updates /etc/alfaos/rdp-quality + these keys)
-for kv in tcp_nodelay=true tcp_keepalive=true bulk_compression=%s new_cursors=true use_fastpath=both bitmap_cache=true bitmap_compression=true max_bpp=%d crypt_level=%s; do
+for kv in tcp_nodelay=true tcp_keepalive=true bulk_compression=%s new_cursors=true use_fastpath=both bitmap_cache=true bitmap_compression=%s max_bpp=%d crypt_level=%s; do
   key="${kv%%=*}"
   val="${kv#*=}"
   if grep -q "^${key}=" /etc/xrdp/xrdp.ini 2>/dev/null; then
@@ -146,8 +147,8 @@ sudo systemctl enable xrdp
 sudo systemctl restart xrdp
 
 echo "==> RDP configured (default resolution %dx%d, quality %s)."
-`, width, height, quality, quality, bpp, compress, light, width, height,
-		compress, bpp, crypt,
+`, width, height, quality, quality, bpp, compress, bitmapCompress, light, width, height,
+		compress, bitmapCompress, bpp, crypt,
 		InstallQualityHooksBash(quality, width, height),
 		port, port, width, height, quality)
 

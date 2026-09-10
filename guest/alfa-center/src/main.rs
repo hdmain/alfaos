@@ -268,32 +268,32 @@ impl AlfaCenterApp {
 
         egui::ComboBox::from_label("Profile")
             .selected_text(match self.quality.as_str() {
-                "low" => "Slow link — 16-bit + compression + alfaoslite wallpaper",
-                "medium" => "Balanced — 24-bit + compression",
-                "high" => "LAN / fast — 32-bit",
-                "ultra" => "Max quality — 32-bit, light compression",
+                "low" => "Slow link — save bandwidth (more lag)",
+                "medium" => "Balanced — wan",
+                "high" => "LAN / fast — lowest input lag",
+                "ultra" => "Max — lowest lag + high res",
                 other => other,
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(
                     &mut self.quality,
                     "low".into(),
-                    "Slow link — 16-bit + compression + alfaoslite wallpaper",
+                    "Slow link — save bandwidth (more lag)",
                 );
                 ui.selectable_value(
                     &mut self.quality,
                     "medium".into(),
-                    "Balanced — 24-bit + compression",
+                    "Balanced — wan",
                 );
                 ui.selectable_value(
                     &mut self.quality,
                     "high".into(),
-                    "LAN / fast — 32-bit",
+                    "LAN / fast — lowest input lag",
                 );
                 ui.selectable_value(
                     &mut self.quality,
                     "ultra".into(),
-                    "Max quality — 32-bit, light compression",
+                    "Max — lowest lag + high res",
                 );
             });
 
@@ -333,8 +333,9 @@ impl AlfaCenterApp {
         ui.add_space(10.0);
         ui.label(
             RichText::new(
-                "Apply once — settings persist across RDP reconnect and reboot.\n\
-                 On a slow connection pick Slow link (alfaoslite wallpaper, less bandwidth).",
+                "For less mouse lag pick LAN / fast, Apply, then reconnect RDP.\n\
+                 Prefer direct VM IP (alfaos connect) — host :3389 proxy adds lag.\n\
+                 Slow link saves bandwidth but increases input lag.",
             )
             .color(Color32::from_rgb(120, 120, 120))
             .size(12.0),

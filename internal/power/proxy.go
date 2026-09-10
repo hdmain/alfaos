@@ -125,6 +125,10 @@ func (p *Proxy) handle(client net.Conn) {
 func setTCPNoDelay(conn net.Conn) {
 	if tc, ok := conn.(*net.TCPConn); ok {
 		_ = tc.SetNoDelay(true)
+		_ = tc.SetKeepAlive(true)
+		_ = tc.SetReadBuffer(256 << 10)
+		_ = tc.SetWriteBuffer(256 << 10)
+		setTCPQuickAck(tc)
 	}
 }
 

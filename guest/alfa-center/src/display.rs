@@ -13,6 +13,7 @@ pub struct LinkProfile {
     pub height: u32,
     pub bpp: u32,
     pub bulk_compression: bool,
+    pub bitmap_compression: bool,
     pub crypt_level: &'static str, // low | medium | high
     pub light_desktop: bool,       // fewer animations / cheaper wallpaper
 }
@@ -25,6 +26,7 @@ pub fn link_profile(quality: &str) -> Option<LinkProfile> {
             height: 720,
             bpp: 16,
             bulk_compression: true,
+            bitmap_compression: true,
             crypt_level: "low",
             light_desktop: true,
         }),
@@ -34,6 +36,7 @@ pub fn link_profile(quality: &str) -> Option<LinkProfile> {
             height: 900,
             bpp: 24,
             bulk_compression: true,
+            bitmap_compression: true,
             crypt_level: "medium",
             light_desktop: false,
         }),
@@ -42,8 +45,9 @@ pub fn link_profile(quality: &str) -> Option<LinkProfile> {
             width: 1920,
             height: 1080,
             bpp: 32,
-            bulk_compression: true,
-            crypt_level: "high",
+            bulk_compression: false,
+            bitmap_compression: false,
+            crypt_level: "low",
             light_desktop: false,
         }),
         "ultra" | "max" => Some(LinkProfile {
@@ -52,7 +56,8 @@ pub fn link_profile(quality: &str) -> Option<LinkProfile> {
             height: 1440,
             bpp: 32,
             bulk_compression: false,
-            crypt_level: "high",
+            bitmap_compression: false,
+            crypt_level: "low",
             light_desktop: false,
         }),
         _ => None,
@@ -63,6 +68,11 @@ pub fn link_profile(quality: &str) -> Option<LinkProfile> {
 pub fn apply_local(quality: &str, width: u32, height: u32, bpp: u32) -> Result<String, String> {
     let profile = link_profile(quality).ok_or_else(|| "unknown profile".to_string())?;
     let compress = if profile.bulk_compression { "true" } else { "false" };
+    let bitmap_compress = if profile.bitmap_compression {
+        "true"
+    } else {
+        "false"
+    };
     let light = if profile.light_desktop { "1" } else { "0" };
     let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":10".into());
 
@@ -71,7 +81,7 @@ pub fn apply_local(quality: &str, width: u32, height: u32, bpp: u32) -> Result<S
 export DISPLAY={display}
 LOG=/tmp/alfaos-quality-local.log
 : > "$LOG"
-echo "profile={pname} DISPLAY=$DISPLAY bpp={bpp} compress={compress} light={light}" >> "$LOG"
+echo "profile={pname} DISPLAY=$DISPLAY bpp={bpp} compress={compress} bitmap={bitmap_compress} light={light}" >> "$LOG"
 
 sudo mkdir -p /etc/alfaos
 sudo tee /etc/alfaos/rdp-quality >/dev/null <<EOF
@@ -79,6 +89,7 @@ QUALITY={quality}
 PROFILE={pname}
 BPP={bpp}
 COMPRESS={compress}
+BITMAP_COMPRESS={bitmap_compress}
 LIGHT={light}
 W={width}
 H={height}
@@ -106,7 +117,7 @@ if [ -f /etc/xrdp/xrdp.ini ]; then
   set_ini use_fastpath both
   set_ini new_cursors true
   set_ini bitmap_cache true
-  set_ini bitmap_compression true
+  set_ini bitmap_compression {bitmap_compress}
   set_ini pointer_cache_size 32
   echo "xrdp.ini tuned" >> "$LOG"
 fi
@@ -163,15 +174,16 @@ cat > /home/alfaos/.local/bin/alfaos-apply-quality.sh << 'QSCRIPT'
 [ -f /etc/alfaos/rdp-quality ] || exit 0
 . /etc/alfaos/rdp-quality
 QUALITY=${{QUALITY:-high}}
-BPP=${{BPP:-24}}
-COMPRESS=${{COMPRESS:-true}}
+BPP=${{BPP:-32}}
+COMPRESS=${{COMPRESS:-false}}
+BITMAP_COMPRESS=${{BITMAP_COMPRESS:-false}}
 LIGHT=${{LIGHT:-0}}
 Q=$(echo "$QUALITY" | tr 'A-Z' 'a-z')
-CRYPT=high
+CRYPT=${{CRYPT:-low}}
 case "$Q" in
-  low|slow) CRYPT=low; BPP=${{BPP:-16}}; LIGHT=${{LIGHT:-1}} ;;
-  medium|med|balanced) CRYPT=medium; BPP=${{BPP:-24}} ;;
-  ultra|max) COMPRESS=${{COMPRESS:-false}} ;;
+  low|slow) CRYPT=low; BPP=${{BPP:-16}}; COMPRESS=true; BITMAP_COMPRESS=true; LIGHT=${{LIGHT:-1}} ;;
+  medium|med|balanced) CRYPT=medium; BPP=${{BPP:-24}}; COMPRESS=true; BITMAP_COMPRESS=true ;;
+  ultra|max|high|lan) CRYPT=low; BPP=${{BPP:-32}}; COMPRESS=false; BITMAP_COMPRESS=false ;;
 esac
 set_ini() {{
   [ -f /etc/xrdp/xrdp.ini ] || return 0
@@ -188,8 +200,9 @@ set_ini tcp_nodelay true
 set_ini tcp_keepalive true
 set_ini crypt_level "$CRYPT"
 set_ini use_fastpath both
+set_ini new_cursors true
 set_ini bitmap_cache true
-set_ini bitmap_compression true
+set_ini bitmap_compression "$BITMAP_COMPRESS"
 set_ini pointer_cache_size 32
 [ -n "${{DISPLAY:-}}" ] || exit 0
 command -v xfconf-query >/dev/null 2>&1 || exit 0
@@ -254,6 +267,7 @@ echo "OK profile={pname} bpp={bpp} compress={compress} display=$CURRENT"
         height = height,
         bpp = bpp,
         compress = compress,
+        bitmap_compress = bitmap_compress,
         crypt = profile.crypt_level,
         light = light,
     );
