@@ -414,7 +414,12 @@ func applyGuestQuality(cfg *config.Config, quality string, w, h int) (bool, erro
 		light = "1"
 	case "medium", "balanced":
 		crypt = "medium"
-	case "high", "lan", "ultra", "max":
+	case "high", "lan":
+		bulk = "false"
+		bitmap = "false"
+		crypt = "low"
+		light = "1"
+	case "ultra", "max":
 		bulk = "false"
 		bitmap = "false"
 		crypt = "low"

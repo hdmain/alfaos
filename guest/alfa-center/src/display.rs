@@ -48,7 +48,7 @@ pub fn link_profile(quality: &str) -> Option<LinkProfile> {
             bulk_compression: false,
             bitmap_compression: false,
             crypt_level: "low",
-            light_desktop: false,
+            light_desktop: true, // alfaoslite.jpg — cheaper encode, less lag
         }),
         "ultra" | "max" => Some(LinkProfile {
             name: "max",
@@ -183,7 +183,8 @@ CRYPT=${{CRYPT:-low}}
 case "$Q" in
   low|slow) CRYPT=low; BPP=${{BPP:-16}}; COMPRESS=true; BITMAP_COMPRESS=true; LIGHT=${{LIGHT:-1}} ;;
   medium|med|balanced) CRYPT=medium; BPP=${{BPP:-24}}; COMPRESS=true; BITMAP_COMPRESS=true ;;
-  ultra|max|high|lan) CRYPT=low; BPP=${{BPP:-32}}; COMPRESS=false; BITMAP_COMPRESS=false ;;
+  ultra|max) CRYPT=low; BPP=${{BPP:-32}}; COMPRESS=false; BITMAP_COMPRESS=false ;;
+  high|lan) CRYPT=low; BPP=${{BPP:-32}}; COMPRESS=false; BITMAP_COMPRESS=false; LIGHT=${{LIGHT:-1}} ;;
 esac
 set_ini() {{
   [ -f /etc/xrdp/xrdp.ini ] || return 0
@@ -290,7 +291,7 @@ echo "OK profile={pname} bpp={bpp} compress={compress} display=$CURRENT"
 
     Ok(format!(
         "Profile '{}' applied permanently ({}-bit, compression={}, light_desktop={}). \
-         Survives reconnect and reboot. Slow link uses alfaoslite.jpg.",
+         Survives reconnect and reboot. Slow link and LAN/fast use alfaoslite.jpg.",
         profile.name, bpp, compress, profile.light_desktop
     ))
 }

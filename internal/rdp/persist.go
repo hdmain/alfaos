@@ -34,6 +34,7 @@ func QualityProfileParams(quality string) (bpp int, bulkCompress, bitmapCompress
 		crypt = "low" // less PDU crypto overhead on LAN
 	case "high", "lan":
 		crypt = "low"
+		light = "1" // alfaoslite.jpg
 	default:
 		// high / unknown → low-latency LAN defaults above
 	}
@@ -70,11 +71,18 @@ case "$Q" in
     COMPRESS=true
     BITMAP_COMPRESS=true
     ;;
-  ultra|max|high|lan)
+  ultra|max)
     CRYPT=low
     BPP=${BPP:-32}
     COMPRESS=false
     BITMAP_COMPRESS=false
+    ;;
+  high|lan)
+    CRYPT=low
+    BPP=${BPP:-32}
+    COMPRESS=false
+    BITMAP_COMPRESS=false
+    LIGHT=${LIGHT:-1}
     ;;
 esac
 

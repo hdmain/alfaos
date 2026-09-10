@@ -270,7 +270,7 @@ impl AlfaCenterApp {
             .selected_text(match self.quality.as_str() {
                 "low" => "Slow link — save bandwidth (more lag)",
                 "medium" => "Balanced — wan",
-                "high" => "LAN / fast — lowest input lag",
+                "high" => "LAN / fast — low lag + alfaoslite wallpaper",
                 "ultra" => "Max — lowest lag + high res",
                 other => other,
             })
@@ -288,7 +288,7 @@ impl AlfaCenterApp {
                 ui.selectable_value(
                     &mut self.quality,
                     "high".into(),
-                    "LAN / fast — lowest input lag",
+                    "LAN / fast — low lag + alfaoslite wallpaper",
                 );
                 ui.selectable_value(
                     &mut self.quality,
