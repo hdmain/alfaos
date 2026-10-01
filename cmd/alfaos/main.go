@@ -435,6 +435,14 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 	if err := guestsetup.InstallAlfaCenter(cfg, vm, vmIP, true); err != nil {
 		return err
 	}
+	// Ensure Discord login notify is installed (also runs from quality hooks).
+	if err := rdp.New(cfg, vm).InstallLoginNotify(vmIP); err != nil {
+		logging.Warn("login Discord notify: %v", err)
+	} else if err := centerapi.NotifyDiscordTest(cfg); err != nil {
+		logging.Warn("Discord test message: %v — check notify.discord_webhook in config", err)
+	} else {
+		logging.Success("Discord test message sent — check your channel")
+	}
 	// Ensure lite wallpaper is on the guest for Slow link profile
 	if err := wallpapers.New(cfg, vm).Install(vmIP); err != nil {
 		logging.Warn("Wallpapers refresh: %v", err)
@@ -444,6 +452,8 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 	fmt.Println("Tip: connect with alfaos connect (direct VM IP); host :3389 proxy adds lag")
 	if strings.TrimSpace(cfg.Notify.DiscordWebhook) != "" {
 		fmt.Println("Tip: Discord webhook enabled — successful RDP logins will notify your channel")
+	} else {
+		fmt.Println("Tip: set notify.discord_webhook in /etc/alfaos/config.yaml to enable login alerts")
 	}
 	return nil
 }

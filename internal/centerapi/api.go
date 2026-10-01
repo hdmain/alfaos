@@ -150,6 +150,7 @@ func (s *Server) listenAndServe() error {
 	mux.HandleFunc("/api/rdp/quality", s.auth(s.handleQuality))
 	mux.HandleFunc("/api/onioning", s.auth(s.handleOnioning))
 	mux.HandleFunc("/api/power", s.auth(s.handlePower))
+	mux.HandleFunc("/api/notify/login", s.auth(s.handleNotifyLogin))
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
