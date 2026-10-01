@@ -27,6 +27,7 @@ var (
 	cfgFile         string
 	force           bool
 	newPassword     string
+	passwdOffline   bool
 	onioningStable  bool
 	version         = "dev"
 )
@@ -129,11 +130,15 @@ Briefly shuts down and restarts the VM if it is running.`,
 		Long: `Change the password for the ALFAOS desktop user.
 
 Updates /etc/alfaos/config.yaml and, when the VM is installed, changes the
-password inside the guest via SSH (starts the VM if it is stopped).`,
+password inside the guest via SSH (starts the VM if it is stopped).
+
+Use --offline when SSH auth is broken (wrong password): stops the VM and
+resets the guest password with virt-customize, then starts it again.`,
 		RunE: runPasswd,
 	}
 	passwdCmd.Flags().StringVarP(&cfgFile, "config", "c", "", "Path to config file (default: /etc/alfaos/config.yaml)")
 	passwdCmd.Flags().StringVar(&newPassword, "password", "", "New password (non-interactive; avoid on shared shells)")
+	passwdCmd.Flags().BoolVar(&passwdOffline, "offline", false, "Reset guest password offline (virt-customize; no SSH)")
 
 	onioningCmd := &cobra.Command{
 		Use:   "onioning [on|off|stable|status]",
@@ -363,7 +368,7 @@ func runPasswd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return passwd.Change(cfg, cfgPath, pass)
+	return passwd.Change(cfg, cfgPath, pass, passwdOffline)
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {

@@ -1,6 +1,7 @@
 package virtualization
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -200,6 +201,9 @@ func (m *Manager) RunSSH(ip, command string) (string, error) {
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "ConnectTimeout=10",
+		"-o", "PreferredAuthentications=password",
+		"-o", "PubkeyAuthentication=no",
+		"-o", "NumberOfPasswordPrompts=1",
 		fmt.Sprintf("%s@%s", m.cfg.ALFAOS.Username, ip),
 		command,
 	}
@@ -218,6 +222,7 @@ func (m *Manager) WaitForSSH(ip string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	attempt := 0
 	var lastErr error
+	var lastOut string
 	for time.Now().Before(deadline) {
 		attempt++
 		out, err := m.RunSSH(ip, "echo ready")
@@ -226,23 +231,30 @@ func (m *Manager) WaitForSSH(ip string, timeout time.Duration) error {
 			return nil
 		}
 		lastErr = err
+		lastOut = out
 		if attempt%6 == 0 {
 			logging.Info("SSH not ready on %s (attempt %d)", ip, attempt)
 			if !m.isIPReachable(ip) {
 				logging.Warn("VM IP %s is not responding to ping", ip)
 			}
+			if isSSHAuthFailure(err, out) {
+				logging.Warn("SSH auth failing (wrong password in config?) — user=%s", m.cfg.ALFAOS.Username)
+			}
 		}
 		time.Sleep(10 * time.Second)
 	}
 
-	m.logSSHDiagnostics(ip, lastErr)
+	m.logSSHDiagnostics(ip, lastErr, lastOut)
 	return fmt.Errorf("SSH not available on %s after %v", ip, timeout)
 }
 
-func (m *Manager) logSSHDiagnostics(ip string, lastErr error) {
+func (m *Manager) logSSHDiagnostics(ip string, lastErr error, lastOut string) {
 	logging.Warn("SSH connection failed — diagnostics:")
 	if lastErr != nil {
 		logging.Warn("  last error: %v", lastErr)
+	}
+	if strings.TrimSpace(lastOut) != "" {
+		logging.Warn("  ssh output: %s", strings.TrimSpace(lastOut))
 	}
 	logging.Warn("  ping: %v", m.isIPReachable(ip))
 	if out, err := host.RunCommand("nc", "-z", "-w", "3", ip, "22"); err != nil {
@@ -251,11 +263,42 @@ func (m *Manager) logSSHDiagnostics(ip string, lastErr error) {
 		logging.Warn("  port 22: open")
 		_ = out
 	}
+	logging.Warn("  config user: %s", m.cfg.ALFAOS.Username)
+	if isSSHAuthFailure(lastErr, lastOut) {
+		logging.Warn("  cause: authentication failed (sshpass exit 5 = wrong password)")
+		logging.Warn("  fix: sync password, e.g.")
+		logging.Warn("       grep -A2 '^alfaos:' /etc/alfaos/config.yaml")
+		logging.Warn("       sudo alfaos passwd --password 'YourRDPPassword'")
+		logging.Warn("       # if SSH is broken, offline reset:")
+		logging.Warn("       sudo alfaos passwd --password 'alfaos' --offline")
+	}
 	if m.IsDebianInstalledOnDisk() {
 		logging.Warn("  Debian is installed on disk — VM may still be booting")
 	} else {
 		logging.Warn("  Debian NOT found on disk — re-run with: sudo /alfaos install --force")
 	}
+}
+
+// isSSHAuthFailure detects sshpass exit 5 / Permission denied.
+func isSSHAuthFailure(err error, out string) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error() + " " + out)
+	if strings.Contains(msg, "exit status 5") {
+		return true
+	}
+	if strings.Contains(msg, "permission denied") {
+		return true
+	}
+	if strings.Contains(msg, "authentication failed") {
+		return true
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 5 {
+		return true
+	}
+	return false
 }
 
 func minDuration(a, b time.Duration) time.Duration {
@@ -269,6 +312,9 @@ func (m *Manager) CopyFile(ip, localPath, remotePath string) error {
 	args := []string{
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "PreferredAuthentications=password",
+		"-o", "PubkeyAuthentication=no",
+		"-o", "NumberOfPasswordPrompts=1",
 		localPath,
 		fmt.Sprintf("%s@%s:%s", m.cfg.ALFAOS.Username, ip, remotePath),
 	}

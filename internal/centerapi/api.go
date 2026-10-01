@@ -246,7 +246,7 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiError{Error: "new password must differ from current"})
 		return
 	}
-	if err := passwd.Change(cfg, s.cfgPath, req.New); err != nil {
+	if err := passwd.Change(cfg, s.cfgPath, req.New, false); err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiError{Error: err.Error()})
 		return
 	}

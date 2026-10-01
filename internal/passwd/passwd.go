@@ -10,13 +10,15 @@ import (
 	"time"
 
 	"github.com/alfaos/alfaos/internal/config"
+	"github.com/alfaos/alfaos/internal/host"
 	"github.com/alfaos/alfaos/internal/logging"
 	"github.com/alfaos/alfaos/internal/virtualization"
 	"golang.org/x/term"
 )
 
 // Change updates the ALFAOS user password in config and inside the VM when possible.
-func Change(cfg *config.Config, cfgPath, newPassword string) error {
+// When offline is true (or SSH is unreachable), resets the guest password via virt-customize.
+func Change(cfg *config.Config, cfgPath, newPassword string, offline bool) error {
 	if strings.TrimSpace(newPassword) == "" {
 		return fmt.Errorf("password cannot be empty")
 	}
@@ -29,7 +31,17 @@ func Change(cfg *config.Config, cfgPath, newPassword string) error {
 	vm := virtualization.New(cfg)
 	vmUpdated := false
 	if vm.DomainExists() {
-		if err := updateVMPassword(vm, user, newPassword); err != nil {
+		var err error
+		if offline {
+			err = updateVMPasswordOffline(cfg, vm, user, newPassword)
+		} else {
+			err = updateVMPassword(vm, user, newPassword)
+			if err != nil && isAuthOrSSHError(err) {
+				logging.Warn("SSH password update failed (%v) — trying offline reset...", err)
+				err = updateVMPasswordOffline(cfg, vm, user, newPassword)
+			}
+		}
+		if err != nil {
 			logging.Warn("Could not update VM password: %v", err)
 			logging.Warn("Config will still be updated — fix VM access manually if needed")
 		} else {
@@ -54,6 +66,17 @@ func Change(cfg *config.Config, cfgPath, newPassword string) error {
 	return nil
 }
 
+func isAuthOrSSHError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "ssh") ||
+		strings.Contains(msg, "exit status 5") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "authentication")
+}
+
 func updateVMPassword(vm *virtualization.Manager, user, newPassword string) error {
 	if !vm.DomainRunning() {
 		logging.Info("VM is stopped — starting to change password...")
@@ -66,7 +89,7 @@ func updateVMPassword(vm *virtualization.Manager, user, newPassword string) erro
 	if err != nil {
 		return fmt.Errorf("VM IP: %w", err)
 	}
-	if err := vm.WaitForSSH(vmIP, 3*time.Minute); err != nil {
+	if err := vm.WaitForSSH(vmIP, 90*time.Second); err != nil {
 		return fmt.Errorf("SSH: %w", err)
 	}
 
@@ -75,6 +98,42 @@ func updateVMPassword(vm *virtualization.Manager, user, newPassword string) erro
 	out, err := vm.RunSSH(vmIP, cmd)
 	if err != nil {
 		return fmt.Errorf("chpasswd: %w\n%s", err, out)
+	}
+	return nil
+}
+
+// updateVMPasswordOffline stops the VM and sets the password with virt-customize.
+func updateVMPasswordOffline(cfg *config.Config, vm *virtualization.Manager, user, newPassword string) error {
+	if !host.CommandExists("virt-customize") {
+		return fmt.Errorf("virt-customize not found — install: sudo apt install libguestfs-tools")
+	}
+
+	wasRunning := vm.DomainRunning()
+	if wasRunning {
+		logging.Info("Stopping VM for offline password reset...")
+		if err := vm.ShutdownVM(2 * time.Minute); err != nil {
+			logging.Warn("Graceful shutdown failed (%v) — forcing power off", err)
+			if err := vm.StopVM(); err != nil {
+				return fmt.Errorf("stop VM: %w", err)
+			}
+		}
+	}
+
+	spec := fmt.Sprintf("%s:password:%s", user, newPassword)
+	logging.Info("Setting guest password offline with virt-customize...")
+	out, err := host.RunCommand("virt-customize", "-d", cfg.VM.Name, "--password", spec)
+	if err != nil {
+		if wasRunning {
+			_ = vm.StartVM()
+		}
+		return fmt.Errorf("virt-customize: %w\n%s", err, out)
+	}
+
+	if wasRunning {
+		logging.Info("Starting VM again...")
+		if err := vm.StartVM(); err != nil {
+			return fmt.Errorf("start VM after password reset: %w", err)
+		}
 	}
 	return nil
 }
