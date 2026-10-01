@@ -437,6 +437,9 @@ func runCenterInstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Alfa Center ready — open it from the VM desktop (API %s)\n", centerapi.APIURLForGuest(cfg))
 	fmt.Println("Tip: for low mouse lag pick LAN / fast in Alfa Center → Apply → reconnect RDP")
 	fmt.Println("Tip: connect with alfaos connect (direct VM IP); host :3389 proxy adds lag")
+	if strings.TrimSpace(cfg.Notify.DiscordWebhook) != "" {
+		fmt.Println("Tip: Discord webhook enabled — successful RDP logins will notify your channel")
+	}
 	return nil
 }
 

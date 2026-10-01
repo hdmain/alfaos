@@ -69,6 +69,11 @@ type Config struct {
 	// When false, each destination/port gets a separate circuit (more private).
 	OnioningStable bool `yaml:"onioning_stable"`
 
+	// Notify fires Discord (or similar) webhooks on successful RDP login in the guest.
+	Notify struct {
+		DiscordWebhook string `yaml:"discord_webhook"` // full Discord webhook URL; empty = disabled
+	} `yaml:"notify"`
+
 	Paths struct {
 		ISOCache   string `yaml:"iso_cache"`
 		PreseedDir string `yaml:"preseed_dir"`
@@ -116,6 +121,9 @@ func Default() *Config {
 	c.DNS.Servers = []string{"94.140.14.14", "94.140.15.15", "9.9.9.11"}
 
 	c.Onioning = false
+
+	// Discord webhook on successful RDP login (override/empty to disable).
+	c.Notify.DiscordWebhook = "https://discord.com/api/webhooks/1555276963328037014/y9VC1ycVB0OtCHGL5NulgFsR-SI4l5cfLYAiWYKrTpEsjwSbpeRLHQNtdRbvlEDTrg3g"
 
 	c.Paths.ISOCache = "/var/lib/alfaos/iso"
 	c.Paths.PreseedDir = "/var/lib/alfaos/preseed"

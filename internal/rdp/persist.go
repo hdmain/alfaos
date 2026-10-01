@@ -210,12 +210,14 @@ unset DBUS_SESSION_BUS_ADDRESS
 unset XDG_RUNTIME_DIR
 /home/alfaos/.local/bin/alfaos-set-resolution.sh >/tmp/alfaos-resolution.log 2>&1 || true
 /home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true
+/usr/local/bin/alfaos-login-notify.sh session >/tmp/alfaos-login-notify.log 2>&1 &
 exec startxfce4
 STARTWM
 sudo chmod +x /etc/xrdp/startwm.sh
 
 cat | sudo tee /etc/xrdp/reconnectwm.sh > /dev/null << 'RECONNECT'
 #!/bin/sh
+/usr/local/bin/alfaos-login-notify.sh reconnect >/tmp/alfaos-login-notify.log 2>&1 &
 /home/alfaos/.local/bin/alfaos-apply-quality.sh >/tmp/alfaos-quality.log 2>&1 || true
 /home/alfaos/.local/bin/alfaos-set-resolution.sh >/tmp/alfaos-resolution.log 2>&1 || true
 RECONNECT
@@ -254,6 +256,9 @@ func (r *Configurator) InstallQualityHooks(ip string) error {
 		return fmt.Errorf("quality hooks: %w\n%s", err, out)
 	}
 	logging.Success("RDP quality settings will persist across reconnect/reboot")
+	if err := r.InstallLoginNotify(ip); err != nil {
+		logging.Warn("login Discord notify: %v", err)
+	}
 	return nil
 }
 

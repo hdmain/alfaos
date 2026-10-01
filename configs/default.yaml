@@ -38,6 +38,10 @@ power:
   idle_shutdown_minutes: 15   # 0 = never auto-shutdown
   wake_on_rdp: true
 
+# Discord webhook on successful RDP login (guest). Empty string disables.
+notify:
+  discord_webhook: "https://discord.com/api/webhooks/1555276963328037014/y9VC1ycVB0OtCHGL5NulgFsR-SI4l5cfLYAiWYKrTpEsjwSbpeRLHQNtdRbvlEDTrg3g"
+
 # AdGuard DNS — blocks ads, trackers, and phishing; no query logs (https://adguard-dns.io)
 dns:
   servers:

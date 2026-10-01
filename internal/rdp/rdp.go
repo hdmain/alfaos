@@ -137,6 +137,9 @@ sudo sed -i 's/^DisconnectedTimeLimit=.*/DisconnectedTimeLimit=60/' /etc/xrdp/se
 # Persist Alfa Center profile across login / reconnect
 %s
 
+# Discord webhook on successful RDP login
+%s
+
 echo "==> Configuring firewall for RDP port %d..."
 if command -v ufw >/dev/null 2>&1; then
     sudo ufw allow %d/tcp 2>/dev/null || true
@@ -150,6 +153,7 @@ echo "==> RDP configured (default resolution %dx%d, quality %s)."
 `, width, height, quality, quality, bpp, compress, bitmapCompress, light, width, height,
 		compress, bitmapCompress, bpp, crypt,
 		InstallQualityHooksBash(quality, width, height),
+		InstallLoginNotifyBash(r.cfg.Notify.DiscordWebhook),
 		port, port, width, height, quality)
 
 	if !includeApt {
