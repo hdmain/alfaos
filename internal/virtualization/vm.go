@@ -221,6 +221,7 @@ func (m *Manager) WaitForSSH(ip string, timeout time.Duration) error {
 
 	deadline := time.Now().Add(timeout)
 	attempt := 0
+	authFails := 0
 	var lastErr error
 	var lastOut string
 	for time.Now().Before(deadline) {
@@ -232,16 +233,27 @@ func (m *Manager) WaitForSSH(ip string, timeout time.Duration) error {
 		}
 		lastErr = err
 		lastOut = out
+		if isSSHAuthFailure(err, out) {
+			authFails++
+			if authFails == 1 {
+				logging.Warn("SSH authentication failed for %s@%s (wrong password in config?)", m.cfg.ALFAOS.Username, ip)
+			}
+			// Wrong password will never recover — fail fast instead of waiting minutes.
+			if authFails >= 2 {
+				m.logSSHDiagnostics(ip, lastErr, lastOut)
+				return fmt.Errorf("SSH auth failed for %s@%s — password in /etc/alfaos/config.yaml does not match the VM.\nFix: sudo alfaos passwd --password %q --offline\nThen: sudo alfaos center-install",
+					m.cfg.ALFAOS.Username, ip, m.cfg.ALFAOS.Password)
+			}
+		} else {
+			authFails = 0
+		}
 		if attempt%6 == 0 {
 			logging.Info("SSH not ready on %s (attempt %d)", ip, attempt)
 			if !m.isIPReachable(ip) {
 				logging.Warn("VM IP %s is not responding to ping", ip)
 			}
-			if isSSHAuthFailure(err, out) {
-				logging.Warn("SSH auth failing (wrong password in config?) — user=%s", m.cfg.ALFAOS.Username)
-			}
 		}
-		time.Sleep(10 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 
 	m.logSSHDiagnostics(ip, lastErr, lastOut)
