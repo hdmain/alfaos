@@ -157,7 +157,12 @@ install_binary() {
 install_config() {
   local raw_base="https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}"
   mkdir -p /etc/alfaos /usr/share/alfaos/assets
-  curl -fsSL "${raw_base}/configs/default.yaml" -o /etc/alfaos/config.yaml
+  # Do not overwrite an existing config (password, webhook, etc.).
+  if [ ! -f /etc/alfaos/config.yaml ]; then
+    curl -fsSL "${raw_base}/configs/default.yaml" -o /etc/alfaos/config.yaml
+  else
+    echo "==> Keeping existing /etc/alfaos/config.yaml"
+  fi
   curl -fsSL "${raw_base}/assets/alfa1.jpeg" -o /usr/share/alfaos/assets/alfa1.jpeg 2>/dev/null || true
   curl -fsSL "${raw_base}/assets/alfa2.jpeg" -o /usr/share/alfaos/assets/alfa2.jpeg 2>/dev/null || true
   curl -fsSL "${raw_base}/assets/alfaos3.png" -o /usr/share/alfaos/assets/alfaos3.png 2>/dev/null || true

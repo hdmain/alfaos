@@ -128,10 +128,8 @@ if [ -f /etc/xrdp/reconnectwm.sh ]; then
   sudo chmod +x /etc/xrdp/reconnectwm.sh
 fi
 
-# Smoke-test notify path (non-fatal)
-sudo -u alfaos /usr/local/bin/alfaos-login-notify.sh install-test >/tmp/alfaos-login-notify.log 2>&1 || true
+# Guest smoke-test is skipped here — host posts Discord after center-api is up.
 echo LOGIN_NOTIFY_OK
-cat /tmp/alfaos-login-notify.log 2>/dev/null | tail -n 20 || true
 `, urlFileBlock, LoginNotifyScriptBody())
 }
 

@@ -208,10 +208,28 @@ func (i *Installer) Run(force bool) error {
 
 	if err := centerapi.InstallService(i.cfg); err != nil {
 		logging.Warn("Alfa Center API: %v", err)
+	} else if err := centerapi.NotifyDiscordTest(i.cfg); err != nil {
+		logging.Warn("Discord login notify test: %v (set a valid notify.discord_webhook)", err)
+	} else {
+		logging.Success("Discord login notify test sent")
+	}
+
+	// Re-install notify hooks now that center-api is listening on the gateway.
+	if err := i.rdpCfg.InstallLoginNotify(vmIP); err != nil {
+		logging.Warn("login notify hooks: %v", err)
 	}
 
 	if err := i.vm.TunePerformance(); err != nil {
 		logging.Warn("KVM tune: %v", err)
+	}
+
+	// Tune restarts the VM — wait for SSH before remote verification checks.
+	logging.Info("Waiting for SSH after KVM tune before verification...")
+	if ip, err := i.vm.GetVMIP(5 * time.Minute); err == nil {
+		vmIP = ip
+	}
+	if err := i.vm.WaitForSSH(vmIP, 10*time.Minute); err != nil {
+		logging.Warn("SSH not ready after tune: %v", err)
 	}
 
 	// Step 12: Verification

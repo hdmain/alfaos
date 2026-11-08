@@ -122,8 +122,8 @@ func Default() *Config {
 
 	c.Onioning = false
 
-	// Discord webhook on successful RDP login (override/empty to disable).
-	c.Notify.DiscordWebhook = "https://discord.com/api/webhooks/1555276963328037014/y9VC1ycVB0OtCHGL5NulgFsR-SI4l5cfLYAiWYKrTpEsjwSbpeRLHQNtdRbvlEDTrg3g"
+	// Discord webhook on successful RDP login (empty = disabled; set in config.yaml).
+	c.Notify.DiscordWebhook = ""
 
 	c.Paths.ISOCache = "/var/lib/alfaos/iso"
 	c.Paths.PreseedDir = "/var/lib/alfaos/preseed"

@@ -85,7 +85,11 @@ func PostDiscordWebhook(webhookURL, content string) error {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("discord HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		msg := strings.TrimSpace(string(b))
+		if resp.StatusCode == 404 {
+			return fmt.Errorf("discord webhook 404 (URL deleted/invalid) — recreate webhook in Discord and set notify.discord_webhook: %s", msg)
+		}
+		return fmt.Errorf("discord HTTP %d: %s", resp.StatusCode, msg)
 	}
 	return nil
 }

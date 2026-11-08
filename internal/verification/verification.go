@@ -3,6 +3,7 @@ package verification
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/alfaos/alfaos/internal/config"
 	"github.com/alfaos/alfaos/internal/host"
@@ -80,6 +81,13 @@ func (v *Verifier) RunAll(hostReq *host.Requirements) (bool, error) {
 func (v *Verifier) RunWithRepair(hostReq *host.Requirements, repairFuncs map[string]func() error) (bool, error) {
 	maxAttempts := 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Never run guest SSH checks while the VM is still booting after tune/reboot.
+		if v.vm.DomainRunning() && v.vmIP != "" {
+			if err := v.vm.WaitForSSH(v.vmIP, 3*time.Minute); err != nil {
+				logging.Warn("SSH not ready for verification (attempt %d): %v", attempt, err)
+			}
+		}
+
 		passed, err := v.RunAll(hostReq)
 		if err != nil {
 			return false, err
@@ -90,6 +98,13 @@ func (v *Verifier) RunWithRepair(hostReq *host.Requirements, repairFuncs map[str
 
 		if attempt == maxAttempts {
 			break
+		}
+
+		// If SSH is down, do not spam full guest reinstalls — wait and retry.
+		if v.sshUnreachable() {
+			logging.Warn("Guest SSH unreachable — waiting before re-check (attempt %d/%d)...", attempt, maxAttempts)
+			_ = v.vm.WaitForSSH(v.vmIP, 2*time.Minute)
+			continue
 		}
 
 		logging.Warn("Some checks failed — attempting automatic repair (attempt %d/%d)...", attempt, maxAttempts)
@@ -116,6 +131,14 @@ func (v *Verifier) RunWithRepair(hostReq *host.Requirements, repairFuncs map[str
 	return false, nil
 }
 
+func (v *Verifier) sshUnreachable() bool {
+	if v.vmIP == "" || !v.vm.DomainRunning() {
+		return true
+	}
+	out, err := v.vm.RunSSH(v.vmIP, "echo ok")
+	return err != nil || !strings.Contains(out, "ok")
+}
+
 func (v *Verifier) FailedComponents() []string {
 	var failed []string
 	for _, r := range v.results {
@@ -132,7 +155,16 @@ func (v *Verifier) add(name string, passed bool, detail string) {
 
 func (v *Verifier) checkRemote(name, cmd string) {
 	out, err := v.vm.RunSSH(v.vmIP, cmd)
-	passed := err == nil && strings.Contains(out, "ok")
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "Connection refused") || strings.Contains(msg, "timed out") {
+			v.add(name, false, "SSH not ready")
+			return
+		}
+		v.add(name, false, strings.TrimSpace(out+" "+msg))
+		return
+	}
+	passed := strings.Contains(out, "ok")
 	v.add(name, passed, "")
 }
 
