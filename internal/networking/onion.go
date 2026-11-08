@@ -81,6 +81,7 @@ func enableOnioning(stateDir, bridge, subnet, gateway string, stable bool) error
 	}
 
 	logging.Success("Onioning ON — Tor-only killswitch active (no clearnet from VM)")
+	logging.Info("Guest DNS (incl. libvirt gateway :53) is redirected to Tor DNSPort")
 	logging.Info("From inside VM open https://check.torproject.org (use a NEW browser tab)")
 	logging.Info("If Tor is down, the VM has no internet — that is intentional")
 	return nil
@@ -246,12 +247,15 @@ if command -v nft >/dev/null 2>&1; then
   nft -f - <<EOF
 table ip ${NFTTABLE} {
   # Torify guest outbound TCP + DNS (before libvirt NAT)
+  # DNS MUST come before subnet return — guest often queries the
+  # libvirt gateway (dnsmasq) which is inside SUBNET and would leak
+  # clearnet DNS (provider / AdGuard) otherwise.
   chain prerouting {
     type nat hook prerouting priority -110; policy accept;
-    iifname "${BRIDGE}" ip daddr ${SUBNET} return
-    iifname "${BRIDGE}" ip daddr 127.0.0.0/8 return
     iifname "${BRIDGE}" udp dport 53 redirect to :${DNSPORT}
     iifname "${BRIDGE}" tcp dport 53 redirect to :${DNSPORT}
+    iifname "${BRIDGE}" ip daddr ${SUBNET} return
+    iifname "${BRIDGE}" ip daddr 127.0.0.0/8 return
     iifname "${BRIDGE}" tcp flags syn / syn,rst redirect to :${TRANSP}
   }
 
@@ -269,10 +273,11 @@ EOF
   echo "alfaos-onion: nftables Tor redirect + killswitch installed"
 else
   iptables -t nat -N "$CHAIN"
-  iptables -t nat -A "$CHAIN" -d "$SUBNET" -j RETURN
-  iptables -t nat -A "$CHAIN" -d 127.0.0.0/8 -j RETURN
+  # DNS before subnet RETURN (guest → gateway:53 would otherwise leak)
   iptables -t nat -A "$CHAIN" -p udp --dport 53 -j REDIRECT --to-ports "$DNSPORT"
   iptables -t nat -A "$CHAIN" -p tcp --dport 53 -j REDIRECT --to-ports "$DNSPORT"
+  iptables -t nat -A "$CHAIN" -d "$SUBNET" -j RETURN
+  iptables -t nat -A "$CHAIN" -d 127.0.0.0/8 -j RETURN
   iptables -t nat -A "$CHAIN" -p tcp --syn -j REDIRECT --to-ports "$TRANSP"
   iptables -t nat -A PREROUTING -i "$BRIDGE" -j "$CHAIN"
 
@@ -472,6 +477,12 @@ func OnioningDiagnostics(libvirtNetwork string) string {
 		fmt.Fprintf(&b, "tor on gateway %s:%d: OK\n", gw, torTransPort)
 	} else if gw != "" {
 		fmt.Fprintf(&b, "tor on gateway %s:%d: FAIL (this caused IP leaks)\n", gw, torTransPort)
+	}
+	ssUDP, _ := hostpkg.RunCommand("ss", "-uln")
+	if strings.Contains(ssUDP, fmt.Sprintf(":%d", torDNSPort)) || strings.Contains(ssOut, fmt.Sprintf(":%d", torDNSPort)) {
+		fmt.Fprintf(&b, "tor DNSPort :%d: listening\n", torDNSPort)
+	} else {
+		fmt.Fprintf(&b, "tor DNSPort :%d: NOT listening (DNS may leak to provider)\n", torDNSPort)
 	}
 
 	if _, err := hostpkg.RunCommand("nft", "list", "table", "ip", nftTable); err == nil {
